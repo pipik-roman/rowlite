@@ -307,6 +307,16 @@ func InitTable(filePath string, columns []string, cfg TableConfig) error {
 		}
 	}
 
+	// Build finalColumns by appending auto-generated audit columns to user columns list
+	var finalColumns []string
+	finalColumns = append(finalColumns, columns...)
+	if cfg.Rowlite.AuditInsert {
+		finalColumns = append(finalColumns, "rowlite-insert-timestamp")
+	}
+	if cfg.Rowlite.AuditEdit {
+		finalColumns = append(finalColumns, "rowlite-edit-timestamp")
+	}
+
 	var existingRows [][]string
 	var oldHeaders []string
 	var alignments []string
@@ -320,12 +330,12 @@ func InitTable(filePath string, columns []string, cfg TableConfig) error {
 	}
 
 	if len(alignments) == 0 {
-		alignments = make([]string, len(columns))
+		alignments = make([]string, len(finalColumns))
 		for i := range alignments {
 			alignments[i] = "---"
 		}
-	} else if len(alignments) != len(columns) {
-		newAlignments := make([]string, len(columns))
+	} else if len(alignments) != len(finalColumns) {
+		newAlignments := make([]string, len(finalColumns))
 		for i := range newAlignments {
 			if i < len(alignments) {
 				newAlignments[i] = alignments[i]
@@ -356,7 +366,7 @@ func InitTable(filePath string, columns []string, cfg TableConfig) error {
 		}
 	}
 
-	_, err = writer.WriteString(FormatGFMLine(columns) + "\n")
+	_, err = writer.WriteString(FormatGFMLine(finalColumns) + "\n")
 	if err != nil {
 		return err
 	}
@@ -367,8 +377,8 @@ func InitTable(filePath string, columns []string, cfg TableConfig) error {
 	}
 
 	for _, row := range existingRows {
-		newRow := make([]string, len(columns))
-		for i, col := range columns {
+		newRow := make([]string, len(finalColumns))
+		for i, col := range finalColumns {
 			oldIdx := -1
 			for j, oh := range oldHeaders {
 				if oh == col {
@@ -404,6 +414,14 @@ func ParseInputData(headers []string, input string) ([]map[string]string, error)
 		return nil, fmt.Errorf("empty input data")
 	}
 
+	// Filter out auto-generated audit columns from the user positional inputs list
+	var userHeaders []string
+	for _, h := range headers {
+		if h != "rowlite-insert-timestamp" && h != "rowlite-edit-timestamp" {
+			userHeaders = append(userHeaders, h)
+		}
+	}
+
 	// Check if JSON object
 	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		var row map[string]string
@@ -433,11 +451,11 @@ func ParseInputData(headers []string, input string) ([]map[string]string, error)
 
 	var rows []map[string]string
 	for recordIdx, record := range records {
-		if len(record) != len(headers) {
-			return nil, fmt.Errorf("CSV row %d has inconsistent column count: got %d, expected %d", recordIdx+1, len(record), len(headers))
+		if len(record) != len(userHeaders) {
+			return nil, fmt.Errorf("CSV row %d has inconsistent column count: got %d, expected %d", recordIdx+1, len(record), len(userHeaders))
 		}
 		rowMap := make(map[string]string)
-		for i, h := range headers {
+		for i, h := range userHeaders {
 			rowMap[h] = record[i]
 		}
 		rows = append(rows, rowMap)
@@ -493,24 +511,12 @@ func AppendRows(filePath string, newRows []map[string]string) error {
 			}
 		}
 
-		// Audit checks
+		// Auto-stamp audit columns if enabled
 		if cfg.Rowlite.AuditInsert {
-			for _, h := range headers {
-				if h == "created_at" || h == "inserted_at" {
-					if rowMap[h] == "" {
-						rowMap[h] = timestamp
-					}
-				}
-			}
+			rowMap["rowlite-insert-timestamp"] = timestamp
 		}
 		if cfg.Rowlite.AuditEdit {
-			for _, h := range headers {
-				if h == "modified_at" || h == "updated_at" {
-					if rowMap[h] == "" {
-						rowMap[h] = timestamp
-					}
-				}
-			}
+			rowMap["rowlite-edit-timestamp"] = timestamp
 		}
 
 		rowCells := make([]string, len(headers))

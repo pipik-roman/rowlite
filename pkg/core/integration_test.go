@@ -19,7 +19,7 @@ func TestIntegration_FullFlow(t *testing.T) {
 	journalPath := filepath.Join(tempDir, "journal.md")
 
 	// 1. Initialize table
-	cols := []string{"id", "name", "priority", "created_at", "modified_at"}
+	cols := []string{"id", "name", "priority"}
 	cfg := TableConfig{
 		Rowlite: RowliteConfig{
 			Unique:      []string{"id"},
@@ -41,11 +41,12 @@ func TestIntegration_FullFlow(t *testing.T) {
 		t.Fatalf("Failed to parse initialized table: %v", err)
 	}
 
-	if !reflect.DeepEqual(headers, cols) {
-		t.Errorf("headers mismatch: got = %v, want %v", headers, cols)
+	expectedHeaders := []string{"id", "name", "priority", "rowlite-insert-timestamp", "rowlite-edit-timestamp"}
+	if !reflect.DeepEqual(headers, expectedHeaders) {
+		t.Errorf("headers mismatch: got = %v, want %v", headers, expectedHeaders)
 	}
-	if len(alignments) != len(cols) {
-		t.Errorf("alignments size mismatch: got = %d, want %d", len(alignments), len(cols))
+	if len(alignments) != len(expectedHeaders) {
+		t.Errorf("alignments size mismatch: got = %d, want %d", len(alignments), len(expectedHeaders))
 	}
 	if len(rows) != 0 {
 		t.Errorf("expected 0 rows initially, got %d", len(rows))

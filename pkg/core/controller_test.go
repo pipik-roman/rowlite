@@ -1,6 +1,7 @@
 package core
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -137,7 +138,7 @@ func TestParseInputData(t *testing.T) {
 	headers := []string{"id", "description"}
 
 	// 1. Single JSON object
-	got, err := ParseInputData(headers, `{"id":"1", "description":"test"}`)
+	got, err := ParseInputData(headers, TableConfig{}, `{"id":"1", "description":"test"}`)
 	if err != nil {
 		t.Fatalf("ParseInputData JSON object failed: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestParseInputData(t *testing.T) {
 	}
 
 	// 2. JSON array
-	got, err = ParseInputData(headers, `[{"id":"1", "description":"test1"},{"id":"2", "description":"test2"}]`)
+	got, err = ParseInputData(headers, TableConfig{}, `[{"id":"1", "description":"test1"},{"id":"2", "description":"test2"}]`)
 	if err != nil {
 		t.Fatalf("ParseInputData JSON array failed: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestParseInputData(t *testing.T) {
 	}
 
 	// 3. Single CSV
-	got, err = ParseInputData(headers, `3,csv_test`)
+	got, err = ParseInputData(headers, TableConfig{}, `3,csv_test`)
 	if err != nil {
 		t.Fatalf("ParseInputData CSV failed: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestParseInputData(t *testing.T) {
 	}
 
 	// 4. Multiline CSV
-	got, err = ParseInputData(headers, "4,first\n5,second")
+	got, err = ParseInputData(headers, TableConfig{}, "4,first\n5,second")
 	if err != nil {
 		t.Fatalf("ParseInputData multiline CSV failed: %v", err)
 	}
@@ -183,8 +184,56 @@ func TestParseInputData(t *testing.T) {
 	}
 
 	// 5. Inconsistent columns count error
-	_, err = ParseInputData(headers, "6,too,many,columns")
+	_, err = ParseInputData(headers, TableConfig{}, "6,too,many,columns")
 	if err == nil {
 		t.Errorf("expected error on inconsistent CSV columns count")
+	}
+}
+
+func TestZeroConfigAuditing(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rowlite_zeroconfig_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	// Zero-config: initialize table without sort/uniqueness/audit configs, but with standard audit column names
+	columns := []string{"id", "description", "created_at", "updated_at"}
+	cfg := TableConfig{}
+
+	err = InitTable(tmpFile.Name(), columns, cfg)
+	if err != nil {
+		t.Fatalf("InitTable failed: %v", err)
+	}
+
+	// Verify GFM table headers on disk
+	_, _, headers, _, err := ParseFrontmatterAndContent(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent failed: %v", err)
+	}
+	if !reflect.DeepEqual(headers, columns) {
+		t.Errorf("headers got = %v, want %v", headers, columns)
+	}
+
+	// Append a row without passing timestamps (user-defined input fields are id and description)
+	err = AppendRow(tmpFile.Name(), map[string]string{"id": "1", "description": "hello"})
+	if err != nil {
+		t.Fatalf("AppendRow failed: %v", err)
+	}
+
+	// Verify that created_at and updated_at were silently auto-filled
+	_, rows, _, _, err := ParseFrontmatterAndContent(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent failed: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got = %d", len(rows))
+	}
+	if rows[0][0] != "1" || rows[0][1] != "hello" {
+		t.Errorf("row values got = %v", rows[0])
+	}
+	if rows[0][2] == "" || rows[0][3] == "" {
+		t.Errorf("created_at and updated_at were not auto-filled: %v", rows[0])
 	}
 }

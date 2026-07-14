@@ -17,13 +17,18 @@ import (
 	"github.com/adrg/frontmatter"
 )
 
+// AuditConfig represents custom timestamp column mapping
+type AuditConfig struct {
+	Insert string `yaml:"insert,omitempty"`
+	Edit   string `yaml:"edit,omitempty"`
+}
+
 // RowliteConfig represents configurations nested under rowlite: namespace
 type RowliteConfig struct {
-	Unique      []string `yaml:"unique,flow"`
-	Sort        string   `yaml:"sort,omitempty"`
-	AuditInsert bool     `yaml:"audit_insert,omitempty"`
-	AuditEdit   bool     `yaml:"audit_edit,omitempty"`
-	JournalLog  string   `yaml:"journal_log,omitempty"`
+	Unique      []string    `yaml:"unique,flow"`
+	Sort        string      `yaml:"sort,omitempty"`
+	Audit       AuditConfig `yaml:"audit,omitempty"`
+	JournalLog  string      `yaml:"journal_log,omitempty"`
 }
 
 // TableConfig represents frontmatter configurations
@@ -159,7 +164,7 @@ func ParseFrontmatterAndContent(filePath string) (TableConfig, [][]string, []str
 
 // SerializeConfig formats frontmatter config as valid YAML frontmatter under rowlite: root
 func SerializeConfig(cfg TableConfig) string {
-	if len(cfg.Rowlite.Unique) == 0 && cfg.Rowlite.Sort == "" && !cfg.Rowlite.AuditInsert && !cfg.Rowlite.AuditEdit && cfg.Rowlite.JournalLog == "" {
+	if len(cfg.Rowlite.Unique) == 0 && cfg.Rowlite.Sort == "" && cfg.Rowlite.Audit.Insert == "" && cfg.Rowlite.Audit.Edit == "" && cfg.Rowlite.JournalLog == "" {
 		return ""
 	}
 	var sb strings.Builder
@@ -178,11 +183,14 @@ func SerializeConfig(cfg TableConfig) string {
 	if cfg.Rowlite.Sort != "" {
 		sb.WriteString("  sort: " + cfg.Rowlite.Sort + "\n")
 	}
-	if cfg.Rowlite.AuditInsert {
-		sb.WriteString("  audit_insert: true\n")
-	}
-	if cfg.Rowlite.AuditEdit {
-		sb.WriteString("  audit_edit: true\n")
+	if cfg.Rowlite.Audit.Insert != "" || cfg.Rowlite.Audit.Edit != "" {
+		sb.WriteString("  audit:\n")
+		if cfg.Rowlite.Audit.Insert != "" {
+			sb.WriteString("    insert: \"" + cfg.Rowlite.Audit.Insert + "\"\n")
+		}
+		if cfg.Rowlite.Audit.Edit != "" {
+			sb.WriteString("    edit: \"" + cfg.Rowlite.Audit.Edit + "\"\n")
+		}
 	}
 	if cfg.Rowlite.JournalLog != "" {
 		sb.WriteString("  journal_log: " + cfg.Rowlite.JournalLog + "\n")
@@ -273,6 +281,35 @@ func WriteJournalRecord(journalPath string, op string, payload map[string]string
 	return err
 }
 
+// IsInsertAuditColumn checks if a column is an auto-filled creation timestamp column
+func IsInsertAuditColumn(colName string, cfg TableConfig) bool {
+	if cfg.Rowlite.Audit.Insert != "" && colName == cfg.Rowlite.Audit.Insert {
+		return true
+	}
+	lowerCol := strings.ToLower(colName)
+	if cfg.Rowlite.Audit.Insert == "" && (lowerCol == "created_at" || lowerCol == "inserted_at") {
+		return true
+	}
+	return false
+}
+
+// IsEditAuditColumn checks if a column is an auto-filled modification timestamp column
+func IsEditAuditColumn(colName string, cfg TableConfig) bool {
+	if cfg.Rowlite.Audit.Edit != "" && colName == cfg.Rowlite.Audit.Edit {
+		return true
+	}
+	lowerCol := strings.ToLower(colName)
+	if cfg.Rowlite.Audit.Edit == "" && (lowerCol == "updated_at" || lowerCol == "modified_at") {
+		return true
+	}
+	return false
+}
+
+// IsAuditColumn checks if a column is an auto-filled audit column (explicit or zero-config fallback)
+func IsAuditColumn(colName string, cfg TableConfig) bool {
+	return IsInsertAuditColumn(colName, cfg) || IsEditAuditColumn(colName, cfg)
+}
+
 // InitTable writes or updates a GFM table with YAML frontmatter configuration
 func InitTable(filePath string, columns []string, cfg TableConfig) error {
 	if len(columns) == 0 {
@@ -307,14 +344,34 @@ func InitTable(filePath string, columns []string, cfg TableConfig) error {
 		}
 	}
 
-	// Build finalColumns by appending auto-generated audit columns to user columns list
+	// Build finalColumns by appending auto-generated audit columns to user columns list if not already present
 	var finalColumns []string
 	finalColumns = append(finalColumns, columns...)
-	if cfg.Rowlite.AuditInsert {
-		finalColumns = append(finalColumns, "rowlite-insert-timestamp")
+
+	if cfg.Rowlite.Audit.Insert != "" {
+		found := false
+		for _, c := range finalColumns {
+			if c == cfg.Rowlite.Audit.Insert {
+				found = true
+				break
+			}
+		}
+		if !found {
+			finalColumns = append(finalColumns, cfg.Rowlite.Audit.Insert)
+		}
 	}
-	if cfg.Rowlite.AuditEdit {
-		finalColumns = append(finalColumns, "rowlite-edit-timestamp")
+
+	if cfg.Rowlite.Audit.Edit != "" {
+		found := false
+		for _, c := range finalColumns {
+			if c == cfg.Rowlite.Audit.Edit {
+				found = true
+				break
+			}
+		}
+		if !found {
+			finalColumns = append(finalColumns, cfg.Rowlite.Audit.Edit)
+		}
 	}
 
 	var existingRows [][]string
@@ -408,7 +465,7 @@ func InitTable(filePath string, columns []string, cfg TableConfig) error {
 }
 
 // ParseInputData parses a string as JSON or CSV into a list of row maps based on headers
-func ParseInputData(headers []string, input string) ([]map[string]string, error) {
+func ParseInputData(headers []string, cfg TableConfig, input string) ([]map[string]string, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
 		return nil, fmt.Errorf("empty input data")
@@ -417,7 +474,7 @@ func ParseInputData(headers []string, input string) ([]map[string]string, error)
 	// Filter out auto-generated audit columns from the user positional inputs list
 	var userHeaders []string
 	for _, h := range headers {
-		if h != "rowlite-insert-timestamp" && h != "rowlite-edit-timestamp" {
+		if !IsAuditColumn(h, cfg) {
 			userHeaders = append(userHeaders, h)
 		}
 	}
@@ -511,12 +568,13 @@ func AppendRows(filePath string, newRows []map[string]string) error {
 			}
 		}
 
-		// Auto-stamp audit columns if enabled
-		if cfg.Rowlite.AuditInsert {
-			rowMap["rowlite-insert-timestamp"] = timestamp
-		}
-		if cfg.Rowlite.AuditEdit {
-			rowMap["rowlite-edit-timestamp"] = timestamp
+		// Auto-stamp audit columns
+		for _, h := range headers {
+			if IsAuditColumn(h, cfg) {
+				if rowMap[h] == "" {
+					rowMap[h] = timestamp
+				}
+			}
 		}
 
 		rowCells := make([]string, len(headers))

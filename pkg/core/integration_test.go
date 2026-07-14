@@ -24,8 +24,10 @@ func TestIntegration_FullFlow(t *testing.T) {
 		Rowlite: RowliteConfig{
 			Unique:      []string{"id"},
 			Sort:        "id:asc",
-			AuditInsert: true,
-			AuditEdit:   true,
+			Audit: AuditConfig{
+				Insert: "rowlite-insert-timestamp",
+				Edit:   "rowlite-edit-timestamp",
+			},
 			JournalLog:  journalPath,
 		},
 	}

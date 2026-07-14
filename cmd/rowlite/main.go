@@ -29,8 +29,8 @@ var initCmd = &cobra.Command{
 		columnsVal, _ := cmd.Flags().GetString("columns")
 		uniqueVal, _ := cmd.Flags().GetString("unique")
 		sortVal, _ := cmd.Flags().GetString("sort")
-		auditInsertVal, _ := cmd.Flags().GetBool("audit-insert")
-		auditEditVal, _ := cmd.Flags().GetBool("audit-edit")
+		auditInsertVal, _ := cmd.Flags().GetString("audit-insert")
+		auditEditVal, _ := cmd.Flags().GetString("audit-edit")
 		journalVal, _ := cmd.Flags().GetString("journal-log")
 
 		if columnsVal == "" {
@@ -54,8 +54,10 @@ var initCmd = &cobra.Command{
 			Rowlite: core.RowliteConfig{
 				Unique:      unique,
 				Sort:        sortVal,
-				AuditInsert: auditInsertVal,
-				AuditEdit:   auditEditVal,
+				Audit: core.AuditConfig{
+					Insert: auditInsertVal,
+					Edit:   auditEditVal,
+				},
 				JournalLog:  journalVal,
 			},
 		}
@@ -194,12 +196,12 @@ var appendCmd = &cobra.Command{
 			return fmt.Errorf("data string content is required either as a positional argument, via --row flag, or piped to stdin")
 		}
 
-		_, _, headers, _, err := core.ParseFrontmatterAndContent(filePath)
+		cfg, _, headers, _, err := core.ParseFrontmatterAndContent(filePath)
 		if err != nil {
 			return err
 		}
 
-		parsedRows, err := core.ParseInputData(headers, dataStr)
+		parsedRows, err := core.ParseInputData(headers, cfg, dataStr)
 		if err != nil {
 			return err
 		}
@@ -245,11 +247,11 @@ var structureCmd = &cobra.Command{
 		if cfg.Rowlite.Sort != "" {
 			fmt.Printf("Sort Configuration: %s\n", cfg.Rowlite.Sort)
 		}
-		if cfg.Rowlite.AuditInsert {
-			fmt.Printf("Audit Insert: true\n")
+		if cfg.Rowlite.Audit.Insert != "" {
+			fmt.Printf("Audit Insert Column: %s\n", cfg.Rowlite.Audit.Insert)
 		}
-		if cfg.Rowlite.AuditEdit {
-			fmt.Printf("Audit Edit: true\n")
+		if cfg.Rowlite.Audit.Edit != "" {
+			fmt.Printf("Audit Edit Column: %s\n", cfg.Rowlite.Audit.Edit)
 		}
 		if cfg.Rowlite.JournalLog != "" {
 			fmt.Printf("Journal Log: %s\n", cfg.Rowlite.JournalLog)
@@ -272,8 +274,8 @@ var mcpCmd = &cobra.Command{
 			Columns     []string `json:"columns" jsonschema:"list of column names in order"`
 			Unique      []string `json:"unique,omitempty" jsonschema:"columns that must be unique"`
 			Sort        string   `json:"sort,omitempty" jsonschema:"sort rule (e.g. id:asc)"`
-			AuditInsert bool     `json:"audit_insert,omitempty" jsonschema:"enable auto creation timestamp auditing"`
-			AuditEdit   bool     `json:"audit_edit,omitempty" jsonschema:"enable auto modification timestamp auditing"`
+			AuditInsert string   `json:"audit_insert,omitempty" jsonschema:"custom name for creation timestamp column"`
+			AuditEdit   string   `json:"audit_edit,omitempty" jsonschema:"custom name for modification timestamp column"`
 			JournalLog  string   `json:"journal_log,omitempty" jsonschema:"path to change journal log file"`
 		}
 		mcp.AddTool(server, &mcp.Tool{
@@ -284,8 +286,10 @@ var mcpCmd = &cobra.Command{
 				Rowlite: core.RowliteConfig{
 					Unique:      args.Unique,
 					Sort:        args.Sort,
-					AuditInsert: args.AuditInsert,
-					AuditEdit:   args.AuditEdit,
+					Audit: core.AuditConfig{
+						Insert: args.AuditInsert,
+						Edit:   args.AuditEdit,
+					},
 					JournalLog:  args.JournalLog,
 				},
 			}
@@ -463,11 +467,11 @@ var mcpCmd = &cobra.Command{
 			if cfg.Rowlite.Sort != "" {
 				sb.WriteString(fmt.Sprintf("Sort Configuration: %s\n", cfg.Rowlite.Sort))
 			}
-			if cfg.Rowlite.AuditInsert {
-				sb.WriteString("Audit Insert: true\n")
+			if cfg.Rowlite.Audit.Insert != "" {
+				sb.WriteString(fmt.Sprintf("Audit Insert Column: %s\n", cfg.Rowlite.Audit.Insert))
 			}
-			if cfg.Rowlite.AuditEdit {
-				sb.WriteString("Audit Edit: true\n")
+			if cfg.Rowlite.Audit.Edit != "" {
+				sb.WriteString(fmt.Sprintf("Audit Edit Column: %s\n", cfg.Rowlite.Audit.Edit))
 			}
 			if cfg.Rowlite.JournalLog != "" {
 				sb.WriteString(fmt.Sprintf("Journal Log: %s\n", cfg.Rowlite.JournalLog))
@@ -490,8 +494,11 @@ func init() {
 	initCmd.Flags().String("columns", "", "ordered columns (comma-separated)")
 	initCmd.Flags().String("unique", "", "unique key columns (comma-separated)")
 	initCmd.Flags().String("sort", "", "frontmatter sort rule (e.g., id:asc)")
-	initCmd.Flags().Bool("audit-insert", false, "presence of auto creation timestamp auditing")
-	initCmd.Flags().Bool("audit-edit", false, "presence of auto modification timestamp auditing")
+	initCmd.Flags().String("audit-insert", "", "enable creation timestamp auditing with custom column name")
+	initCmd.Flags().Lookup("audit-insert").NoOptDefVal = "rowlite-insert-timestamp"
+
+	initCmd.Flags().String("audit-edit", "", "enable modification timestamp auditing with custom column name")
+	initCmd.Flags().Lookup("audit-edit").NoOptDefVal = "rowlite-edit-timestamp"
 	initCmd.Flags().String("journal-log", "", "path to change journal log file")
 
 	listCmd.Flags().StringSlice("where", nil, "WHERE conditions")

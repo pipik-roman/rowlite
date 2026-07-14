@@ -57,8 +57,9 @@ func AtomicWriteTable(filePath string, cfg TableConfig, headers []string, alignm
 
 	writer := bufio.NewWriter(tempFile)
 
-	if len(cfg.Columns) > 0 {
-		_, err = writer.WriteString(SerializeConfig(cfg))
+	frontmatterStr := SerializeConfig(cfg)
+	if frontmatterStr != "" {
+		_, err = writer.WriteString(frontmatterStr)
 		if err != nil {
 			return err
 		}

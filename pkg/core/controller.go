@@ -16,14 +16,18 @@ import (
 	"github.com/adrg/frontmatter"
 )
 
-// TableConfig represents frontmatter configurations
-type TableConfig struct {
-	Columns     []string `yaml:"columns,flow"`
+// RowliteConfig represents configurations nested under rowlite: namespace
+type RowliteConfig struct {
 	Unique      []string `yaml:"unique,flow"`
 	Sort        string   `yaml:"sort,omitempty"`
 	AuditInsert bool     `yaml:"audit_insert,omitempty"`
 	AuditEdit   bool     `yaml:"audit_edit,omitempty"`
 	JournalLog  string   `yaml:"journal_log,omitempty"`
+}
+
+// TableConfig represents frontmatter configurations
+type TableConfig struct {
+	Rowlite RowliteConfig `yaml:"rowlite"`
 }
 
 // Filter represents a single WHERE filter condition
@@ -152,23 +156,17 @@ func ParseFrontmatterAndContent(filePath string) (TableConfig, [][]string, []str
 	return cfg, rows, headers, alignments, nil
 }
 
-// SerializeConfig formats frontmatter config as valid YAML frontmatter
+// SerializeConfig formats frontmatter config as valid YAML frontmatter under rowlite: root
 func SerializeConfig(cfg TableConfig) string {
+	if len(cfg.Rowlite.Unique) == 0 && cfg.Rowlite.Sort == "" && !cfg.Rowlite.AuditInsert && !cfg.Rowlite.AuditEdit && cfg.Rowlite.JournalLog == "" {
+		return ""
+	}
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	if len(cfg.Columns) > 0 {
-		sb.WriteString("columns: [")
-		for i, col := range cfg.Columns {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(col)
-		}
-		sb.WriteString("]\n")
-	}
-	if len(cfg.Unique) > 0 {
-		sb.WriteString("unique: [")
-		for i, u := range cfg.Unique {
+	sb.WriteString("rowlite:\n")
+	if len(cfg.Rowlite.Unique) > 0 {
+		sb.WriteString("  unique: [")
+		for i, u := range cfg.Rowlite.Unique {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
@@ -176,17 +174,17 @@ func SerializeConfig(cfg TableConfig) string {
 		}
 		sb.WriteString("]\n")
 	}
-	if cfg.Sort != "" {
-		sb.WriteString("sort: " + cfg.Sort + "\n")
+	if cfg.Rowlite.Sort != "" {
+		sb.WriteString("  sort: " + cfg.Rowlite.Sort + "\n")
 	}
-	if cfg.AuditInsert {
-		sb.WriteString("audit_insert: true\n")
+	if cfg.Rowlite.AuditInsert {
+		sb.WriteString("  audit_insert: true\n")
 	}
-	if cfg.AuditEdit {
-		sb.WriteString("audit_edit: true\n")
+	if cfg.Rowlite.AuditEdit {
+		sb.WriteString("  audit_edit: true\n")
 	}
-	if cfg.JournalLog != "" {
-		sb.WriteString("journal_log: " + cfg.JournalLog + "\n")
+	if cfg.Rowlite.JournalLog != "" {
+		sb.WriteString("  journal_log: " + cfg.Rowlite.JournalLog + "\n")
 	}
 	sb.WriteString("---\n")
 	return sb.String()
@@ -275,14 +273,14 @@ func WriteJournalRecord(journalPath string, op string, payload map[string]string
 }
 
 // InitTable writes or updates a GFM table with YAML frontmatter configuration
-func InitTable(filePath string, cfg TableConfig) error {
-	if len(cfg.Columns) == 0 {
+func InitTable(filePath string, columns []string, cfg TableConfig) error {
+	if len(columns) == 0 {
 		return fmt.Errorf("columns list cannot be empty")
 	}
 
-	for _, u := range cfg.Unique {
+	for _, u := range cfg.Rowlite.Unique {
 		found := false
-		for _, c := range cfg.Columns {
+		for _, c := range columns {
 			if c == u {
 				found = true
 				break
@@ -293,11 +291,11 @@ func InitTable(filePath string, cfg TableConfig) error {
 		}
 	}
 
-	if cfg.Sort != "" {
-		parts := strings.SplitN(cfg.Sort, ":", 2)
+	if cfg.Rowlite.Sort != "" {
+		parts := strings.SplitN(cfg.Rowlite.Sort, ":", 2)
 		sortCol := strings.TrimSpace(parts[0])
 		found := false
-		for _, c := range cfg.Columns {
+		for _, c := range columns {
 			if c == sortCol {
 				found = true
 				break
@@ -321,12 +319,12 @@ func InitTable(filePath string, cfg TableConfig) error {
 	}
 
 	if len(alignments) == 0 {
-		alignments = make([]string, len(cfg.Columns))
+		alignments = make([]string, len(columns))
 		for i := range alignments {
 			alignments[i] = "---"
 		}
-	} else if len(alignments) != len(cfg.Columns) {
-		newAlignments := make([]string, len(cfg.Columns))
+	} else if len(alignments) != len(columns) {
+		newAlignments := make([]string, len(columns))
 		for i := range newAlignments {
 			if i < len(alignments) {
 				newAlignments[i] = alignments[i]
@@ -350,12 +348,14 @@ func InitTable(filePath string, cfg TableConfig) error {
 	}()
 
 	writer := bufio.NewWriter(tempFile)
-	_, err = writer.WriteString(frontmatterStr)
-	if err != nil {
-		return err
+	if frontmatterStr != "" {
+		_, err = writer.WriteString(frontmatterStr)
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err = writer.WriteString(FormatGFMLine(cfg.Columns) + "\n")
+	_, err = writer.WriteString(FormatGFMLine(columns) + "\n")
 	if err != nil {
 		return err
 	}
@@ -366,8 +366,8 @@ func InitTable(filePath string, cfg TableConfig) error {
 	}
 
 	for _, row := range existingRows {
-		newRow := make([]string, len(cfg.Columns))
-		for i, col := range cfg.Columns {
+		newRow := make([]string, len(columns))
+		for i, col := range columns {
 			oldIdx := -1
 			for j, oh := range oldHeaders {
 				if oh == col {
@@ -406,8 +406,8 @@ func AppendRow(filePath string, newRowVals map[string]string) error {
 		return fmt.Errorf("table headers not initialized or table not found in %s", filePath)
 	}
 
-	if len(cfg.Unique) > 0 {
-		for _, u := range cfg.Unique {
+	if len(cfg.Rowlite.Unique) > 0 {
+		for _, u := range cfg.Rowlite.Unique {
 			newVal := newRowVals[u]
 			colIdx := -1
 			for idx, h := range headers {
@@ -427,7 +427,7 @@ func AppendRow(filePath string, newRowVals map[string]string) error {
 	}
 
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	if cfg.AuditInsert {
+	if cfg.Rowlite.AuditInsert {
 		for _, h := range headers {
 			if h == "created_at" || h == "inserted_at" {
 				if newRowVals[h] == "" {
@@ -436,7 +436,7 @@ func AppendRow(filePath string, newRowVals map[string]string) error {
 			}
 		}
 	}
-	if cfg.AuditEdit {
+	if cfg.Rowlite.AuditEdit {
 		for _, h := range headers {
 			if h == "modified_at" || h == "updated_at" {
 				if newRowVals[h] == "" {
@@ -451,11 +451,11 @@ func AppendRow(filePath string, newRowVals map[string]string) error {
 		rowCells[i] = newRowVals[h]
 	}
 
-	if cfg.Sort == "" {
+	if cfg.Rowlite.Sort == "" {
 		err = AppendRowDirectly(filePath, rowCells)
 	} else {
 		allRows := append(rows, rowCells)
-		err = SortRows(headers, allRows, cfg.Sort)
+		err = SortRows(headers, allRows, cfg.Rowlite.Sort)
 		if err != nil {
 			return err
 		}
@@ -465,8 +465,8 @@ func AppendRow(filePath string, newRowVals map[string]string) error {
 		return err
 	}
 
-	if cfg.JournalLog != "" {
-		_ = WriteJournalRecord(cfg.JournalLog, "APPEND", newRowVals)
+	if cfg.Rowlite.JournalLog != "" {
+		_ = WriteJournalRecord(cfg.Rowlite.JournalLog, "APPEND", newRowVals)
 	}
 
 	return nil
@@ -484,19 +484,19 @@ func SortTableAction(filePath string, byRule string, trigger bool) error {
 
 	sortRule := byRule
 	if sortRule == "" {
-		sortRule = cfg.Sort
+		sortRule = cfg.Rowlite.Sort
 	}
 	if sortRule == "" {
 		return fmt.Errorf("no sort rule specified or configured in frontmatter")
 	}
 
 	if trigger {
-		cfg.Sort = sortRule
+		cfg.Rowlite.Sort = sortRule
 		err = SortRows(headers, rows, sortRule)
 		if err != nil {
 			return err
 		}
-		return InitTable(filePath, cfg)
+		return InitTable(filePath, headers, cfg)
 	}
 
 	err = SortRows(headers, rows, sortRule)

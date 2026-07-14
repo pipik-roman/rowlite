@@ -19,16 +19,18 @@ func TestIntegration_FullFlow(t *testing.T) {
 	journalPath := filepath.Join(tempDir, "journal.md")
 
 	// 1. Initialize table
+	cols := []string{"id", "name", "priority", "created_at", "modified_at"}
 	cfg := TableConfig{
-		Columns:     []string{"id", "name", "priority", "created_at", "modified_at"},
-		Unique:      []string{"id"},
-		Sort:        "id:asc",
-		AuditInsert: true,
-		AuditEdit:   true,
-		JournalLog:  journalPath,
+		Rowlite: RowliteConfig{
+			Unique:      []string{"id"},
+			Sort:        "id:asc",
+			AuditInsert: true,
+			AuditEdit:   true,
+			JournalLog:  journalPath,
+		},
 	}
 
-	err = InitTable(tablePath, cfg)
+	err = InitTable(tablePath, cols, cfg)
 	if err != nil {
 		t.Fatalf("Failed to initialize table: %v", err)
 	}
@@ -39,11 +41,11 @@ func TestIntegration_FullFlow(t *testing.T) {
 		t.Fatalf("Failed to parse initialized table: %v", err)
 	}
 
-	if !reflect.DeepEqual(headers, cfg.Columns) {
-		t.Errorf("headers mismatch: got = %v, want %v", headers, cfg.Columns)
+	if !reflect.DeepEqual(headers, cols) {
+		t.Errorf("headers mismatch: got = %v, want %v", headers, cols)
 	}
-	if len(alignments) != len(cfg.Columns) {
-		t.Errorf("alignments size mismatch: got = %d, want %d", len(alignments), len(cfg.Columns))
+	if len(alignments) != len(cols) {
+		t.Errorf("alignments size mismatch: got = %d, want %d", len(alignments), len(cols))
 	}
 	if len(rows) != 0 {
 		t.Errorf("expected 0 rows initially, got %d", len(rows))
@@ -190,10 +192,8 @@ func TestIntegration_FullFlow(t *testing.T) {
 	// 9. Verify direct append optimization (no temp swap)
 	// We disable sorting by initializing table without sort
 	unsortedPath := filepath.Join(tempDir, "unsorted.md")
-	cfgUnsorted := TableConfig{
-		Columns: []string{"id", "name"},
-	}
-	err = InitTable(unsortedPath, cfgUnsorted)
+	cfgUnsorted := TableConfig{}
+	err = InitTable(unsortedPath, []string{"id", "name"}, cfgUnsorted)
 	if err != nil {
 		t.Fatalf("Failed to init unsorted table: %v", err)
 	}

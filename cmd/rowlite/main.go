@@ -51,15 +51,16 @@ var initCmd = &cobra.Command{
 		}
 
 		cfg := core.TableConfig{
-			Columns:     columns,
-			Unique:      unique,
-			Sort:        sortVal,
-			AuditInsert: auditInsertVal,
-			AuditEdit:   auditEditVal,
-			JournalLog:  journalVal,
+			Rowlite: core.RowliteConfig{
+				Unique:      unique,
+				Sort:        sortVal,
+				AuditInsert: auditInsertVal,
+				AuditEdit:   auditEditVal,
+				JournalLog:  journalVal,
+			},
 		}
 
-		return core.InitTable(filePath, cfg)
+		return core.InitTable(filePath, columns, cfg)
 	},
 }
 
@@ -215,20 +216,20 @@ var structureCmd = &cobra.Command{
 		if len(align) > 0 {
 			fmt.Printf("Alignments: %s\n", strings.Join(align, ", "))
 		}
-		if len(cfg.Unique) > 0 {
-			fmt.Printf("Unique Keys: %s\n", strings.Join(cfg.Unique, ", "))
+		if len(cfg.Rowlite.Unique) > 0 {
+			fmt.Printf("Unique Keys: %s\n", strings.Join(cfg.Rowlite.Unique, ", "))
 		}
-		if cfg.Sort != "" {
-			fmt.Printf("Sort Configuration: %s\n", cfg.Sort)
+		if cfg.Rowlite.Sort != "" {
+			fmt.Printf("Sort Configuration: %s\n", cfg.Rowlite.Sort)
 		}
-		if cfg.AuditInsert {
+		if cfg.Rowlite.AuditInsert {
 			fmt.Printf("Audit Insert: true\n")
 		}
-		if cfg.AuditEdit {
+		if cfg.Rowlite.AuditEdit {
 			fmt.Printf("Audit Edit: true\n")
 		}
-		if cfg.JournalLog != "" {
-			fmt.Printf("Journal Log: %s\n", cfg.JournalLog)
+		if cfg.Rowlite.JournalLog != "" {
+			fmt.Printf("Journal Log: %s\n", cfg.Rowlite.JournalLog)
 		}
 		return nil
 	},
@@ -257,14 +258,15 @@ var mcpCmd = &cobra.Command{
 			Description: "Initialize a new table structure or update frontmatter constraints in-place",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args InitTableArgs) (*mcp.CallToolResult, any, error) {
 			cfg := core.TableConfig{
-				Columns:     args.Columns,
-				Unique:      args.Unique,
-				Sort:        args.Sort,
-				AuditInsert: args.AuditInsert,
-				AuditEdit:   args.AuditEdit,
-				JournalLog:  args.JournalLog,
+				Rowlite: core.RowliteConfig{
+					Unique:      args.Unique,
+					Sort:        args.Sort,
+					AuditInsert: args.AuditInsert,
+					AuditEdit:   args.AuditEdit,
+					JournalLog:  args.JournalLog,
+				},
 			}
-			err := core.InitTable(args.File, cfg)
+			err := core.InitTable(args.File, args.Columns, cfg)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -432,20 +434,20 @@ var mcpCmd = &cobra.Command{
 			if len(align) > 0 {
 				sb.WriteString(fmt.Sprintf("Alignments: %s\n", strings.Join(align, ", ")))
 			}
-			if len(cfg.Unique) > 0 {
-				sb.WriteString(fmt.Sprintf("Unique Keys: %s\n", strings.Join(cfg.Unique, ", ")))
+			if len(cfg.Rowlite.Unique) > 0 {
+				sb.WriteString(fmt.Sprintf("Unique Keys: %s\n", strings.Join(cfg.Rowlite.Unique, ", ")))
 			}
-			if cfg.Sort != "" {
-				sb.WriteString(fmt.Sprintf("Sort Configuration: %s\n", cfg.Sort))
+			if cfg.Rowlite.Sort != "" {
+				sb.WriteString(fmt.Sprintf("Sort Configuration: %s\n", cfg.Rowlite.Sort))
 			}
-			if cfg.AuditInsert {
+			if cfg.Rowlite.AuditInsert {
 				sb.WriteString("Audit Insert: true\n")
 			}
-			if cfg.AuditEdit {
+			if cfg.Rowlite.AuditEdit {
 				sb.WriteString("Audit Edit: true\n")
 			}
-			if cfg.JournalLog != "" {
-				sb.WriteString(fmt.Sprintf("Journal Log: %s\n", cfg.JournalLog))
+			if cfg.Rowlite.JournalLog != "" {
+				sb.WriteString(fmt.Sprintf("Journal Log: %s\n", cfg.Rowlite.JournalLog))
 			}
 
 			return &mcp.CallToolResult{

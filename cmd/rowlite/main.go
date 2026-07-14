@@ -495,10 +495,10 @@ func init() {
 	initCmd.Flags().String("unique", "", "unique key columns (comma-separated)")
 	initCmd.Flags().String("sort", "", "frontmatter sort rule (e.g., id:asc)")
 	initCmd.Flags().String("audit-insert", "", "enable creation timestamp auditing with custom column name")
-	initCmd.Flags().Lookup("audit-insert").NoOptDefVal = "rowlite-insert-timestamp"
+	initCmd.Flags().Lookup("audit-insert").NoOptDefVal = "created_at"
 
 	initCmd.Flags().String("audit-edit", "", "enable modification timestamp auditing with custom column name")
-	initCmd.Flags().Lookup("audit-edit").NoOptDefVal = "rowlite-edit-timestamp"
+	initCmd.Flags().Lookup("audit-edit").NoOptDefVal = "updated_at"
 	initCmd.Flags().String("journal-log", "", "path to change journal log file")
 
 	listCmd.Flags().StringSlice("where", nil, "WHERE conditions")

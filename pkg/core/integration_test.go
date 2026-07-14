@@ -25,8 +25,8 @@ func TestIntegration_FullFlow(t *testing.T) {
 			Unique:      []string{"id"},
 			Sort:        "id:asc",
 			Audit: AuditConfig{
-				Insert: "rowlite-insert-timestamp",
-				Edit:   "rowlite-edit-timestamp",
+				Insert: "created_at",
+				Edit:   "updated_at",
 			},
 			JournalLog:  journalPath,
 		},
@@ -43,7 +43,7 @@ func TestIntegration_FullFlow(t *testing.T) {
 		t.Fatalf("Failed to parse initialized table: %v", err)
 	}
 
-	expectedHeaders := []string{"id", "name", "priority", "rowlite-insert-timestamp", "rowlite-edit-timestamp"}
+	expectedHeaders := []string{"id", "name", "priority", "created_at", "updated_at"}
 	if !reflect.DeepEqual(headers, expectedHeaders) {
 		t.Errorf("headers mismatch: got = %v, want %v", headers, expectedHeaders)
 	}

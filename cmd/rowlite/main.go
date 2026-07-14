@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -33,15 +34,6 @@ var initCmd = &cobra.Command{
 		auditEditVal, _ := cmd.Flags().GetString("audit-edit")
 		journalVal, _ := cmd.Flags().GetString("journal-log")
 
-		if columnsVal == "" {
-			return fmt.Errorf("--columns flag is required")
-		}
-
-		columns := strings.Split(columnsVal, ",")
-		for i := range columns {
-			columns[i] = strings.TrimSpace(columns[i])
-		}
-
 		var unique []string
 		if uniqueVal != "" {
 			unique = strings.Split(uniqueVal, ",")
@@ -60,6 +52,52 @@ var initCmd = &cobra.Command{
 				},
 				JournalLog:  journalVal,
 			},
+		}
+
+		fileExists := false
+		if _, err := os.Stat(filePath); err == nil {
+			fileExists = true
+		}
+
+		var columns []string
+		if columnsVal == "" {
+			if !fileExists {
+				return fmt.Errorf("--columns flag is required when creating a new table")
+			}
+			// Parse existing headers to get the columns list
+			_, _, headers, _, err := core.ParseFrontmatterAndContent(filePath)
+			if err != nil {
+				return fmt.Errorf("failed to parse existing table structure: %v", err)
+			}
+			if len(headers) == 0 {
+				return fmt.Errorf("existing file has no table headers. Please specify --columns to initialize a table")
+			}
+			// Filter out audit columns because InitTable will append them automatically
+			for _, h := range headers {
+				if !core.IsAuditColumn(h, cfg) {
+					columns = append(columns, h)
+				}
+			}
+		} else {
+			columns = strings.Split(columnsVal, ",")
+			for i := range columns {
+				columns[i] = strings.TrimSpace(columns[i])
+			}
+			if fileExists {
+				// Validate that columns match the existing table structure
+				_, _, headers, _, err := core.ParseFrontmatterAndContent(filePath)
+				if err == nil && len(headers) > 0 {
+					var existingUserCols []string
+					for _, h := range headers {
+						if !core.IsAuditColumn(h, cfg) {
+							existingUserCols = append(existingUserCols, h)
+						}
+					}
+					if !reflect.DeepEqual(columns, existingUserCols) {
+						return fmt.Errorf("specified columns %v do not match existing table structure %v. Run without --columns flag to preserve structure", columns, existingUserCols)
+					}
+				}
+			}
 		}
 
 		return core.InitTable(filePath, columns, cfg)
@@ -271,7 +309,7 @@ var mcpCmd = &cobra.Command{
 
 		type InitTableArgs struct {
 			File        string   `json:"file" jsonschema:"path to the markdown file"`
-			Columns     []string `json:"columns" jsonschema:"list of column names in order"`
+			Columns     []string `json:"columns,omitempty" jsonschema:"list of column names in order (optional for existing tables)"`
 			Unique      []string `json:"unique,omitempty" jsonschema:"columns that must be unique"`
 			Sort        string   `json:"sort,omitempty" jsonschema:"sort rule (e.g. id:asc)"`
 			AuditInsert string   `json:"audit_insert,omitempty" jsonschema:"custom name for creation timestamp column"`
@@ -293,7 +331,47 @@ var mcpCmd = &cobra.Command{
 					JournalLog:  args.JournalLog,
 				},
 			}
-			err := core.InitTable(args.File, args.Columns, cfg)
+
+			fileExists := false
+			if _, err := os.Stat(args.File); err == nil {
+				fileExists = true
+			}
+
+			columns := args.Columns
+			if len(columns) == 0 {
+				if !fileExists {
+					return nil, nil, fmt.Errorf("columns parameter is required when creating a new table")
+				}
+				_, _, headers, _, err := core.ParseFrontmatterAndContent(args.File)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to parse existing table structure: %v", err)
+				}
+				if len(headers) == 0 {
+					return nil, nil, fmt.Errorf("existing file has no table headers. Please specify columns to initialize a table")
+				}
+				for _, h := range headers {
+					if !core.IsAuditColumn(h, cfg) {
+						columns = append(columns, h)
+					}
+				}
+			} else {
+				if fileExists {
+					_, _, headers, _, err := core.ParseFrontmatterAndContent(args.File)
+					if err == nil && len(headers) > 0 {
+						var existingUserCols []string
+						for _, h := range headers {
+							if !core.IsAuditColumn(h, cfg) {
+								existingUserCols = append(existingUserCols, h)
+							}
+						}
+						if !reflect.DeepEqual(columns, existingUserCols) {
+							return nil, nil, fmt.Errorf("specified columns %v do not match existing table structure %v. Omit columns parameter to preserve structure", columns, existingUserCols)
+						}
+					}
+				}
+			}
+
+			err := core.InitTable(args.File, columns, cfg)
 			if err != nil {
 				return nil, nil, err
 			}

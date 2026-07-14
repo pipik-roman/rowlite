@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -164,24 +164,47 @@ var countCmd = &cobra.Command{
 }
 
 var appendCmd = &cobra.Command{
-	Use:   "append <file>",
-	Short: "Append row values to table",
-	Args:  cobra.ExactArgs(1),
+	Use:   "append <file> [data-string]",
+	Short: "Append row values to table (supports JSON/CSV strings and stdin)",
+	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filePath := args[0]
-		rowJSON, _ := cmd.Flags().GetString("row")
+		var dataStr string
 
-		if rowJSON == "" {
-			return fmt.Errorf("--row JSON value is required")
+		if len(args) == 2 {
+			dataStr = args[1]
+		} else {
+			rowJSON, _ := cmd.Flags().GetString("row")
+			if rowJSON != "" {
+				dataStr = rowJSON
+			} else {
+				// Read from stdin if piped
+				stat, _ := os.Stdin.Stat()
+				if (stat.Mode() & os.ModeCharDevice) == 0 {
+					bytes, err := io.ReadAll(os.Stdin)
+					if err == nil {
+						dataStr = string(bytes)
+					}
+				}
+			}
 		}
 
-		var rowVals map[string]string
-		err := json.Unmarshal([]byte(rowJSON), &rowVals)
+		dataStr = strings.TrimSpace(dataStr)
+		if dataStr == "" {
+			return fmt.Errorf("data string content is required either as a positional argument, via --row flag, or piped to stdin")
+		}
+
+		_, _, headers, _, err := core.ParseFrontmatterAndContent(filePath)
 		if err != nil {
-			return fmt.Errorf("invalid row JSON: %v", err)
+			return err
 		}
 
-		return core.AppendRow(filePath, rowVals)
+		parsedRows, err := core.ParseInputData(headers, dataStr)
+		if err != nil {
+			return err
+		}
+
+		return core.AppendRows(filePath, parsedRows)
 	},
 }
 
@@ -475,7 +498,6 @@ func init() {
 	countCmd.Flags().StringSlice("where", nil, "WHERE conditions")
 
 	appendCmd.Flags().String("row", "", "JSON row object to append")
-	appendCmd.MarkFlagRequired("row")
 
 	sortCmd.Flags().String("by", "", "override sort rule (e.g., id:desc)")
 	sortCmd.Flags().Bool("trigger", false, "trigger sorting by updating frontmatter permanently")

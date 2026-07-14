@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -396,8 +397,61 @@ func InitTable(filePath string, columns []string, cfg TableConfig) error {
 	return os.Rename(tempPath, filePath)
 }
 
-// AppendRow appends a row validating uniqueness, sorting, auditing, and change logging
-func AppendRow(filePath string, newRowVals map[string]string) error {
+// ParseInputData parses a string as JSON or CSV into a list of row maps based on headers
+func ParseInputData(headers []string, input string) ([]map[string]string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty input data")
+	}
+
+	// Check if JSON object
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		var row map[string]string
+		err := json.Unmarshal([]byte(trimmed), &row)
+		if err != nil {
+			return nil, fmt.Errorf("invalid row JSON: %v", err)
+		}
+		return []map[string]string{row}, nil
+	}
+
+	// Check if JSON array
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		var rows []map[string]string
+		err := json.Unmarshal([]byte(trimmed), &rows)
+		if err != nil {
+			return nil, fmt.Errorf("invalid rows JSON array: %v", err)
+		}
+		return rows, nil
+	}
+
+	// Treat as CSV
+	reader := csv.NewReader(strings.NewReader(trimmed))
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("invalid CSV content: %v", err)
+	}
+
+	var rows []map[string]string
+	for recordIdx, record := range records {
+		if len(record) != len(headers) {
+			return nil, fmt.Errorf("CSV row %d has inconsistent column count: got %d, expected %d", recordIdx+1, len(record), len(headers))
+		}
+		rowMap := make(map[string]string)
+		for i, h := range headers {
+			rowMap[h] = record[i]
+		}
+		rows = append(rows, rowMap)
+	}
+
+	return rows, nil
+}
+
+// AppendRows appends multiple rows validating uniqueness, sorting, auditing, and change logging
+func AppendRows(filePath string, newRows []map[string]string) error {
+	if len(newRows) == 0 {
+		return nil
+	}
+
 	cfg, rows, headers, alignments, err := ParseFrontmatterAndContent(filePath)
 	if err != nil {
 		return err
@@ -406,70 +460,101 @@ func AppendRow(filePath string, newRowVals map[string]string) error {
 		return fmt.Errorf("table headers not initialized or table not found in %s", filePath)
 	}
 
-	if len(cfg.Rowlite.Unique) > 0 {
-		for _, u := range cfg.Rowlite.Unique {
-			newVal := newRowVals[u]
-			colIdx := -1
-			for idx, h := range headers {
-				if h == u {
-					colIdx = idx
-					break
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+
+	// Pre-process and validate all new rows
+	var validatedRows [][]string
+	for _, rowMap := range newRows {
+		// Unique checks
+		if len(cfg.Rowlite.Unique) > 0 {
+			for _, u := range cfg.Rowlite.Unique {
+				newVal := rowMap[u]
+				colIdx := -1
+				for idx, h := range headers {
+					if h == u {
+						colIdx = idx
+						break
+					}
 				}
-			}
-			if colIdx != -1 {
-				for _, row := range rows {
-					if colIdx < len(row) && row[colIdx] == newVal {
-						return fmt.Errorf("duplicate key error: value %q for column %q already exists", newVal, u)
+				if colIdx != -1 {
+					// Check against existing rows
+					for _, r := range rows {
+						if colIdx < len(r) && r[colIdx] == newVal {
+							return fmt.Errorf("duplicate key error: value %q for column %q already exists", newVal, u)
+						}
+					}
+					// Check against other new rows in this batch
+					for _, r := range validatedRows {
+						if colIdx < len(r) && r[colIdx] == newVal {
+							return fmt.Errorf("duplicate key error: value %q for column %q already exists in append batch", newVal, u)
+						}
 					}
 				}
 			}
 		}
-	}
 
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	if cfg.Rowlite.AuditInsert {
-		for _, h := range headers {
-			if h == "created_at" || h == "inserted_at" {
-				if newRowVals[h] == "" {
-					newRowVals[h] = timestamp
+		// Audit checks
+		if cfg.Rowlite.AuditInsert {
+			for _, h := range headers {
+				if h == "created_at" || h == "inserted_at" {
+					if rowMap[h] == "" {
+						rowMap[h] = timestamp
+					}
 				}
 			}
 		}
-	}
-	if cfg.Rowlite.AuditEdit {
-		for _, h := range headers {
-			if h == "modified_at" || h == "updated_at" {
-				if newRowVals[h] == "" {
-					newRowVals[h] = timestamp
+		if cfg.Rowlite.AuditEdit {
+			for _, h := range headers {
+				if h == "modified_at" || h == "updated_at" {
+					if rowMap[h] == "" {
+						rowMap[h] = timestamp
+					}
 				}
 			}
 		}
+
+		rowCells := make([]string, len(headers))
+		for i, h := range headers {
+			rowCells[i] = rowMap[h]
+		}
+		validatedRows = append(validatedRows, rowCells)
 	}
 
-	rowCells := make([]string, len(headers))
-	for i, h := range headers {
-		rowCells[i] = newRowVals[h]
-	}
-
+	// Write phase
 	if cfg.Rowlite.Sort == "" {
-		err = AppendRowDirectly(filePath, rowCells)
+		// We can append multiple rows directly to the file
+		for _, rowCells := range validatedRows {
+			err = AppendRowDirectly(filePath, rowCells)
+			if err != nil {
+				return err
+			}
+		}
 	} else {
-		allRows := append(rows, rowCells)
+		// We need to write atomically after sorting
+		allRows := append(rows, validatedRows...)
 		err = SortRows(headers, allRows, cfg.Rowlite.Sort)
 		if err != nil {
 			return err
 		}
 		err = AtomicWriteTable(filePath, cfg, headers, alignments, allRows)
-	}
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
 
+	// Logging journal
 	if cfg.Rowlite.JournalLog != "" {
-		_ = WriteJournalRecord(cfg.Rowlite.JournalLog, "APPEND", newRowVals)
+		for _, rowMap := range newRows {
+			_ = WriteJournalRecord(cfg.Rowlite.JournalLog, "APPEND", rowMap)
+		}
 	}
 
 	return nil
+}
+
+// AppendRow appends a single row validating uniqueness, sorting, auditing, and change logging
+func AppendRow(filePath string, newRowVals map[string]string) error {
+	return AppendRows(filePath, []map[string]string{newRowVals})
 }
 
 // SortTableAction sorts the table either one-time or triggers auto-sorting configuration updates

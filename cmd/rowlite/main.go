@@ -317,7 +317,7 @@ var mcpCmd = &cobra.Command{
 			JournalLog  string   `json:"journal_log,omitempty" jsonschema:"path to change journal log file"`
 		}
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        "init_table",
+			Name:        "rowlite_init",
 			Description: "Initialize a new table structure or update frontmatter constraints in-place",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args InitTableArgs) (*mcp.CallToolResult, any, error) {
 			cfg := core.TableConfig{
@@ -387,7 +387,7 @@ var mcpCmd = &cobra.Command{
 			Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions"`
 		}
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        "list_content",
+			Name:        "rowlite_list",
 			Description: "List matching rows from the markdown GFM table",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args ListContentArgs) (*mcp.CallToolResult, any, error) {
 			var filters []core.Filter
@@ -441,7 +441,7 @@ var mcpCmd = &cobra.Command{
 			Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions"`
 		}
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        "count_content",
+			Name:        "rowlite_count",
 			Description: "Count matching rows from the markdown GFM table",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args CountContentArgs) (*mcp.CallToolResult, any, error) {
 			var filters []core.Filter
@@ -488,7 +488,7 @@ var mcpCmd = &cobra.Command{
 			Row  map[string]string `json:"row" jsonschema:"JSON object mapping column names to cell values"`
 		}
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        "append_row",
+			Name:        "rowlite_append",
 			Description: "Append a row to the GFM table (validates unique and sort frontmatter rules)",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args AppendRowArgs) (*mcp.CallToolResult, any, error) {
 			err := core.AppendRow(args.File, args.Row)
@@ -508,7 +508,7 @@ var mcpCmd = &cobra.Command{
 			Trigger bool   `json:"trigger,omitempty" jsonschema:"if true, updates the frontmatter sort constraint to trigger auto-sort on future writes"`
 		}
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        "sort_table",
+			Name:        "rowlite_sort",
 			Description: "Sort the markdown GFM table in-place",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args SortTableArgs) (*mcp.CallToolResult, any, error) {
 			err := core.SortTableAction(args.File, args.By, args.Trigger)
@@ -526,7 +526,7 @@ var mcpCmd = &cobra.Command{
 			File string `json:"file" jsonschema:"path to the markdown file"`
 		}
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        "get_table_structure",
+			Name:        "rowlite_get_structure",
 			Description: "Display table column headers and frontmatter configurations",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args GetTableStructureArgs) (*mcp.CallToolResult, any, error) {
 			cfg, _, headers, align, err := core.ParseFrontmatterAndContent(args.File)

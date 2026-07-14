@@ -21,7 +21,8 @@ type TableConfig struct {
 	Columns     []string `yaml:"columns,flow"`
 	Unique      []string `yaml:"unique,flow"`
 	Sort        string   `yaml:"sort,omitempty"`
-	AuditFields bool     `yaml:"audit_fields,omitempty"`
+	AuditInsert bool     `yaml:"audit_insert,omitempty"`
+	AuditEdit   bool     `yaml:"audit_edit,omitempty"`
 	JournalLog  string   `yaml:"journal_log,omitempty"`
 }
 
@@ -178,8 +179,11 @@ func SerializeConfig(cfg TableConfig) string {
 	if cfg.Sort != "" {
 		sb.WriteString("sort: " + cfg.Sort + "\n")
 	}
-	if cfg.AuditFields {
-		sb.WriteString("audit_fields: true\n")
+	if cfg.AuditInsert {
+		sb.WriteString("audit_insert: true\n")
+	}
+	if cfg.AuditEdit {
+		sb.WriteString("audit_edit: true\n")
 	}
 	if cfg.JournalLog != "" {
 		sb.WriteString("journal_log: " + cfg.JournalLog + "\n")
@@ -422,14 +426,18 @@ func AppendRow(filePath string, newRowVals map[string]string) error {
 		}
 	}
 
-	if cfg.AuditFields {
-		timestamp := time.Now().Format("2006-01-02 15:04:05")
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	if cfg.AuditInsert {
 		for _, h := range headers {
 			if h == "created_at" || h == "inserted_at" {
 				if newRowVals[h] == "" {
 					newRowVals[h] = timestamp
 				}
 			}
+		}
+	}
+	if cfg.AuditEdit {
+		for _, h := range headers {
 			if h == "modified_at" || h == "updated_at" {
 				if newRowVals[h] == "" {
 					newRowVals[h] = timestamp

@@ -23,7 +23,8 @@ func TestIntegration_FullFlow(t *testing.T) {
 		Columns:     []string{"id", "name", "priority", "created_at", "modified_at"},
 		Unique:      []string{"id"},
 		Sort:        "id:asc",
-		AuditFields: true,
+		AuditInsert: true,
+		AuditEdit:   true,
 		JournalLog:  journalPath,
 	}
 

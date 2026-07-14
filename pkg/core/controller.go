@@ -260,7 +260,6 @@ func WriteJournalRecord(journalPath string, op string, payload map[string]string
 	}
 	defer file.Close()
 
-	// Check if file is empty to write header
 	stat, err := file.Stat()
 	if err == nil && stat.Size() == 0 {
 		file.WriteString("| timestamp | operation | details |\n| --- | --- | --- |\n")
@@ -269,4 +268,233 @@ func WriteJournalRecord(journalPath string, op string, payload map[string]string
 	logRow := []string{timestamp, op, string(payloadBytes)}
 	_, err = file.WriteString(FormatGFMLine(logRow) + "\n")
 	return err
+}
+
+// InitTable writes or updates a GFM table with YAML frontmatter configuration
+func InitTable(filePath string, cfg TableConfig) error {
+	if len(cfg.Columns) == 0 {
+		return fmt.Errorf("columns list cannot be empty")
+	}
+
+	for _, u := range cfg.Unique {
+		found := false
+		for _, c := range cfg.Columns {
+			if c == u {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("unique column %q not found in columns list", u)
+		}
+	}
+
+	if cfg.Sort != "" {
+		parts := strings.SplitN(cfg.Sort, ":", 2)
+		sortCol := strings.TrimSpace(parts[0])
+		found := false
+		for _, c := range cfg.Columns {
+			if c == sortCol {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("sort column %q not found in columns list", sortCol)
+		}
+	}
+
+	var existingRows [][]string
+	var oldHeaders []string
+	var alignments []string
+	if _, err := os.Stat(filePath); err == nil {
+		_, rows, hdrs, align, parseErr := ParseFrontmatterAndContent(filePath)
+		if parseErr == nil {
+			existingRows = rows
+			oldHeaders = hdrs
+			alignments = align
+		}
+	}
+
+	if len(alignments) == 0 {
+		alignments = make([]string, len(cfg.Columns))
+		for i := range alignments {
+			alignments[i] = "---"
+		}
+	} else if len(alignments) != len(cfg.Columns) {
+		newAlignments := make([]string, len(cfg.Columns))
+		for i := range newAlignments {
+			if i < len(alignments) {
+				newAlignments[i] = alignments[i]
+			} else {
+				newAlignments[i] = "---"
+			}
+		}
+		alignments = newAlignments
+	}
+
+	frontmatterStr := SerializeConfig(cfg)
+
+	tempPath := filePath + ".tmp"
+	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempPath)
+	}()
+
+	writer := bufio.NewWriter(tempFile)
+	_, err = writer.WriteString(frontmatterStr)
+	if err != nil {
+		return err
+	}
+
+	_, err = writer.WriteString(FormatGFMLine(cfg.Columns) + "\n")
+	if err != nil {
+		return err
+	}
+
+	_, err = writer.WriteString(FormatGFMLine(alignments) + "\n")
+	if err != nil {
+		return err
+	}
+
+	for _, row := range existingRows {
+		newRow := make([]string, len(cfg.Columns))
+		for i, col := range cfg.Columns {
+			oldIdx := -1
+			for j, oh := range oldHeaders {
+				if oh == col {
+					oldIdx = j
+					break
+				}
+			}
+			if oldIdx != -1 && oldIdx < len(row) {
+				newRow[i] = row[oldIdx]
+			} else {
+				newRow[i] = ""
+			}
+		}
+		_, err = writer.WriteString(FormatGFMLine(newRow) + "\n")
+		if err != nil {
+			return err
+		}
+	}
+
+	err = writer.Flush()
+	if err != nil {
+		return err
+	}
+	tempFile.Close()
+
+	return os.Rename(tempPath, filePath)
+}
+
+// AppendRow appends a row validating uniqueness, sorting, auditing, and change logging
+func AppendRow(filePath string, newRowVals map[string]string) error {
+	cfg, rows, headers, alignments, err := ParseFrontmatterAndContent(filePath)
+	if err != nil {
+		return err
+	}
+	if len(headers) == 0 {
+		return fmt.Errorf("table headers not initialized or table not found in %s", filePath)
+	}
+
+	if len(cfg.Unique) > 0 {
+		for _, u := range cfg.Unique {
+			newVal := newRowVals[u]
+			colIdx := -1
+			for idx, h := range headers {
+				if h == u {
+					colIdx = idx
+					break
+				}
+			}
+			if colIdx != -1 {
+				for _, row := range rows {
+					if colIdx < len(row) && row[colIdx] == newVal {
+						return fmt.Errorf("duplicate key error: value %q for column %q already exists", newVal, u)
+					}
+				}
+			}
+		}
+	}
+
+	if cfg.AuditFields {
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
+		for _, h := range headers {
+			if h == "created_at" || h == "inserted_at" {
+				if newRowVals[h] == "" {
+					newRowVals[h] = timestamp
+				}
+			}
+			if h == "modified_at" || h == "updated_at" {
+				if newRowVals[h] == "" {
+					newRowVals[h] = timestamp
+				}
+			}
+		}
+	}
+
+	rowCells := make([]string, len(headers))
+	for i, h := range headers {
+		rowCells[i] = newRowVals[h]
+	}
+
+	if cfg.Sort == "" {
+		err = AppendRowDirectly(filePath, rowCells)
+	} else {
+		allRows := append(rows, rowCells)
+		err = SortRows(headers, allRows, cfg.Sort)
+		if err != nil {
+			return err
+		}
+		err = AtomicWriteTable(filePath, cfg, headers, alignments, allRows)
+	}
+	if err != nil {
+		return err
+	}
+
+	if cfg.JournalLog != "" {
+		_ = WriteJournalRecord(cfg.JournalLog, "APPEND", newRowVals)
+	}
+
+	return nil
+}
+
+// SortTableAction sorts the table either one-time or triggers auto-sorting configuration updates
+func SortTableAction(filePath string, byRule string, trigger bool) error {
+	cfg, rows, headers, alignments, err := ParseFrontmatterAndContent(filePath)
+	if err != nil {
+		return err
+	}
+	if len(headers) == 0 {
+		return fmt.Errorf("table headers not found in %s", filePath)
+	}
+
+	sortRule := byRule
+	if sortRule == "" {
+		sortRule = cfg.Sort
+	}
+	if sortRule == "" {
+		return fmt.Errorf("no sort rule specified or configured in frontmatter")
+	}
+
+	if trigger {
+		cfg.Sort = sortRule
+		err = SortRows(headers, rows, sortRule)
+		if err != nil {
+			return err
+		}
+		return InitTable(filePath, cfg)
+	}
+
+	err = SortRows(headers, rows, sortRule)
+	if err != nil {
+		return err
+	}
+
+	return AtomicWriteTable(filePath, cfg, headers, alignments, rows)
 }

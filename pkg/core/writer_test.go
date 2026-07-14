@@ -54,7 +54,7 @@ func TestAtomicWriteTable(t *testing.T) {
 		{"2", "Bob"},
 	}
 
-	err = AtomicWriteTable(tmpFile.Name(), headers, alignments, rows)
+	err = AtomicWriteTable(tmpFile.Name(), TableConfig{}, headers, alignments, rows)
 	if err != nil {
 		t.Fatalf("AtomicWriteTable() error = %v", err)
 	}

@@ -43,8 +43,8 @@ func AppendRowDirectly(filePath string, row []string) error {
 	return err
 }
 
-// AtomicWriteTable writes headers, separator, and rows atomically using a temp file.
-func AtomicWriteTable(filePath string, headers []string, alignments []string, rows [][]string) error {
+// AtomicWriteTable writes frontmatter config, headers, separator, and rows atomically using a temp file.
+func AtomicWriteTable(filePath string, cfg TableConfig, headers []string, alignments []string, rows [][]string) error {
 	tempPath := filePath + ".tmp"
 	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -56,6 +56,13 @@ func AtomicWriteTable(filePath string, headers []string, alignments []string, ro
 	}()
 
 	writer := bufio.NewWriter(tempFile)
+
+	if len(cfg.Columns) > 0 {
+		_, err = writer.WriteString(SerializeConfig(cfg))
+		if err != nil {
+			return err
+		}
+	}
 
 	_, err = writer.WriteString(FormatGFMLine(headers) + "\n")
 	if err != nil {

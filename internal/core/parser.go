@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -23,7 +24,7 @@ func SplitGFMLine(line string) ([]string, error) {
 		return nil, fmt.Errorf("empty line")
 	}
 	if trimmed[0] != '|' || trimmed[len(trimmed)-1] != '|' {
-		return nil, fmt.Errorf("GFM table row must start and end with '|'")
+		return nil, fmt.Errorf("gfm table row must start and end with '|'")
 	}
 
 	var cells []string
@@ -105,7 +106,7 @@ func IsSeparatorLine(cells []string) bool {
 // - alignments: raw alignment cells
 // - headerLineNum: 1-based line number of the header row (row 0 of table)
 // - error: any parsing error or table-not-found error
-func ScanTableHeaders(filePath string) (headers []string, alignments []string, headerLineNum int, err error) {
+func ScanTableHeaders(ctx context.Context, filePath string) (headers []string, alignments []string, headerLineNum int, err error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, nil, 0, err
@@ -139,7 +140,7 @@ func ScanTableHeaders(filePath string) (headers []string, alignments []string, h
 		line := lineBuf.String()
 		trimmed := strings.TrimSpace(line)
 
-		if len(trimmed) > 0 && trimmed[0] == '|' && strings.Count(trimmed, "|") >= 2 {
+		if isTableRow(trimmed) {
 			cells, parseErr := SplitGFMLine(line)
 			if parseErr == nil {
 				if lastCells != nil && IsSeparatorLine(cells) {
@@ -160,5 +161,10 @@ func ScanTableHeaders(filePath string) (headers []string, alignments []string, h
 		}
 	}
 
-	return nil, nil, 0, fmt.Errorf("no GFM table found in %s", filePath)
+	return nil, nil, 0, fmt.Errorf("no gfm table found in %s", filePath)
+}
+
+// isTableRow checks if a trimmed line meets the GFM table row criteria.
+func isTableRow(trimmed string) bool {
+	return len(trimmed) > 0 && trimmed[0] == '|' && strings.Count(trimmed, "|") >= 2
 }

@@ -1,9 +1,12 @@
-package core
+package core_test
 
 import (
+	"context"
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/roman-pipik/rowlite/internal/core"
 )
 
 func TestSplitGFMLine(t *testing.T) {
@@ -47,7 +50,7 @@ func TestSplitGFMLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := SplitGFMLine(tt.line)
+			got, err := core.SplitGFMLine(tt.line)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SplitGFMLine() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -84,7 +87,7 @@ func TestFormatGFMLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatGFMLine(tt.cells)
+			got := core.FormatGFMLine(tt.cells)
 			if got != tt.want {
 				t.Errorf("FormatGFMLine() got = %v, want %v", got, tt.want)
 			}
@@ -122,7 +125,7 @@ func TestIsSeparatorLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := IsSeparatorLine(tt.cells)
+			got := core.IsSeparatorLine(tt.cells)
 			if got != tt.want {
 				t.Errorf("IsSeparatorLine() got = %v, want %v", got, tt.want)
 			}
@@ -147,7 +150,7 @@ func TestScanTableHeaders(t *testing.T) {
 	}
 	tmpFile.Close()
 
-	headers, alignments, lineNum, err := ScanTableHeaders(tmpFile.Name())
+	headers, alignments, lineNum, err := core.ScanTableHeaders(context.Background(), tmpFile.Name())
 	if err != nil {
 		t.Fatalf("ScanTableHeaders() error = %v", err)
 	}

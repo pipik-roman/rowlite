@@ -1,0 +1,986 @@
+package core
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/adrg/frontmatter"
+)
+
+const (
+	timestampFormat    = "2006-01-02 15:04:05"
+	defaultSortDir     = "asc"
+	descSortDir        = "desc"
+	fallbackCreatedAt  = "created_at"
+	fallbackInsertedAt = "inserted_at"
+	fallbackUpdatedAt  = "updated_at"
+	fallbackModifiedAt = "modified_at"
+)
+
+// AuditConfig represents custom timestamp column mapping
+type AuditConfig struct {
+	Insert string `yaml:"insert,omitempty"`
+	Edit   string `yaml:"edit,omitempty"`
+}
+
+// RowliteConfig represents configurations nested under rowlite: namespace
+type RowliteConfig struct {
+	Unique      []string    `yaml:"unique,flow"`
+	Sort        string      `yaml:"sort,omitempty"`
+	Audit       AuditConfig `yaml:"audit,omitempty"`
+	JournalLog  string      `yaml:"journal_log,omitempty"`
+}
+
+// rawFrontmatter represents the raw YAML structure parsed from frontmatter
+type rawFrontmatter struct {
+	Rowlite RowliteConfig `yaml:"rowlite"`
+}
+
+type SortRule struct {
+	ColIdx int
+	Dir    string
+}
+
+// TableConfig represents work-optimized runtime configurations and metadata
+type TableConfig struct {
+	Headers         []string
+	Alignments      []string
+	UniqueIndices   []int
+	AuditIndices    []int
+	SortRules       []SortRule
+	JournalLog      string
+	Unique          []string
+	Sort            string
+	Audit           AuditConfig
+	RowCount        int
+	IsSortColUnique bool
+}
+
+func (tc TableConfig) NumColumns() int {
+	return len(tc.Headers)
+}
+
+func (tc TableConfig) IsSorted() bool {
+	return len(tc.SortRules) > 0
+}
+
+
+// Filter represents a single WHERE filter condition
+type Filter struct {
+	Column   string
+	Operator string
+	Value    string
+}
+
+// ParseFilter parses a WHERE condition like "priority==high"
+func ParseFilter(expr string) (Filter, error) {
+	var col, op, val string
+	if strings.Contains(expr, "==") {
+		parts := strings.SplitN(expr, "==", 2)
+		col, op, val = strings.TrimSpace(parts[0]), "==", strings.TrimSpace(parts[1])
+	} else if strings.Contains(expr, "!=") {
+		parts := strings.SplitN(expr, "!=", 2)
+		col, op, val = strings.TrimSpace(parts[0]), "!=", strings.TrimSpace(parts[1])
+	} else if strings.Contains(expr, " like ") {
+		parts := strings.SplitN(expr, " like ", 2)
+		col, op, val = strings.TrimSpace(parts[0]), "like", strings.TrimSpace(parts[1])
+	} else if strings.Contains(expr, " regex ") {
+		parts := strings.SplitN(expr, " regex ", 2)
+		col, op, val = strings.TrimSpace(parts[0]), "regex", strings.TrimSpace(parts[1])
+	} else {
+		// Fallbacks without spaces around operators
+		if idx := strings.Index(expr, "like"); idx > 0 {
+			col, op, val = strings.TrimSpace(expr[:idx]), "like", strings.TrimSpace(expr[idx+4:])
+		} else if idx := strings.Index(expr, "regex"); idx > 0 {
+			col, op, val = strings.TrimSpace(expr[:idx]), "regex", strings.TrimSpace(expr[idx+5:])
+		} else {
+			return Filter{}, fmt.Errorf("invalid filter expression: %s (must contain ==, !=, like, or regex)", expr)
+		}
+	}
+	return Filter{Column: col, Operator: op, Value: val}, nil
+}
+
+// EvaluateFilter checks if a row cell matches the filter
+func EvaluateFilter(headers []string, row []string, filter Filter) (bool, error) {
+	colIdx := findIndex(headers, false, filter.Column)
+	if colIdx == -1 {
+		return false, fmt.Errorf("column %q not found in table headers", filter.Column)
+	}
+	if colIdx >= len(row) {
+		return false, nil
+	}
+
+	cellValue := row[colIdx]
+	switch filter.Operator {
+	case "==":
+		return cellValue == filter.Value, nil
+	case "!=":
+		return cellValue != filter.Value, nil
+	case "like":
+		return strings.Contains(strings.ToLower(cellValue), strings.ToLower(filter.Value)), nil
+	case "regex":
+		re, err := regexp.Compile(filter.Value)
+		if err != nil {
+			return false, fmt.Errorf("invalid regex %q: %w", filter.Value, err)
+		}
+		return re.MatchString(cellValue), nil
+	default:
+		return false, fmt.Errorf("unknown operator %q", filter.Operator)
+	}
+}
+
+type ContentMode int
+
+const (
+	ContentModeAll  ContentMode = iota // Read all rows of the table
+	ContentModeLast                    // Read only the last row of the table
+	ContentModeNone                    // Read no rows of the table
+	ContentModeAuto                    // Decide automatically based on unique/sort rules
+)
+
+// ParseFrontmatterAndContent parses the frontmatter and table from a file according to the ContentMode
+func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode ContentMode) (TableConfig, [][]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return TableConfig{}, nil, err
+	}
+	defer file.Close()
+
+	var raw rawFrontmatter
+	restBytes, err := frontmatter.Parse(file, &raw)
+	if err != nil {
+		file.Seek(0, 0)
+		restBytes, err = io.ReadAll(file)
+		if err != nil {
+			return TableConfig{}, nil, err
+		}
+		raw = rawFrontmatter{}
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(restBytes))
+	var headers []string
+	var alignments []string
+	tableStarted := false
+
+	// Find headers and alignments
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		if isTableRow(trimmed) {
+			cells, err := SplitGFMLine(line)
+			if err == nil {
+				if !tableStarted {
+					headers = cells
+					tableStarted = true
+					continue
+				}
+				if len(alignments) == 0 && IsSeparatorLine(cells) {
+					alignments = cells
+					break
+				}
+			}
+		}
+	}
+
+	if len(headers) == 0 || len(alignments) == 0 {
+		return TableConfig{}, nil, fmt.Errorf("gfm table headers and alignments not found in %s", filePath)
+	}
+
+	cfg := TableConfig{
+		Headers:    headers,
+		Alignments: alignments,
+		JournalLog: raw.Rowlite.JournalLog,
+		Unique:     raw.Rowlite.Unique,
+		Sort:       raw.Rowlite.Sort,
+		Audit:      raw.Rowlite.Audit,
+	}
+
+	// Resolve derived Sort fields
+	if cfg.Sort != "" {
+		rulesParts := strings.Split(cfg.Sort, ",")
+		for _, part := range rulesParts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			parts := strings.SplitN(part, ":", 2)
+			sortColName := strings.TrimSpace(parts[0])
+			dir := defaultSortDir
+			if len(parts) > 1 {
+				dir = strings.ToLower(strings.TrimSpace(parts[1]))
+			}
+			colIdx := findIndex(headers, false, sortColName)
+			if colIdx == -1 {
+				return TableConfig{}, nil, fmt.Errorf("sort column %q not found in table headers", sortColName)
+			}
+			cfg.SortRules = append(cfg.SortRules, SortRule{ColIdx: colIdx, Dir: dir})
+		}
+	}
+
+	// Resolve derived Unique column indices
+	for _, u := range cfg.Unique {
+		colIdx := findIndex(headers, false, u)
+		if colIdx != -1 {
+			cfg.UniqueIndices = append(cfg.UniqueIndices, colIdx)
+		}
+	}
+
+	// Resolve isSortColUnique: true if the sequence of unique columns forms a prefix of the sort columns in the same order
+	cfg.IsSortColUnique = false
+	if len(cfg.UniqueIndices) > 0 && len(cfg.UniqueIndices) <= len(cfg.SortRules) {
+		prefixMatch := true
+		for i, uIdx := range cfg.UniqueIndices {
+			if cfg.SortRules[i].ColIdx != uIdx {
+				prefixMatch = false
+				break
+			}
+		}
+		cfg.IsSortColUnique = prefixMatch
+	}
+
+	// Resolve derived Audit column indices
+	if cfg.Audit.Insert != "" {
+		if idx := findIndex(headers, false, cfg.Audit.Insert); idx != -1 {
+			cfg.AuditIndices = append(cfg.AuditIndices, idx)
+		}
+	} else {
+		if idx := findIndex(headers, true, fallbackCreatedAt, fallbackInsertedAt); idx != -1 {
+			cfg.AuditIndices = append(cfg.AuditIndices, idx)
+		}
+	}
+
+	if cfg.Audit.Edit != "" {
+		if idx := findIndex(headers, false, cfg.Audit.Edit); idx != -1 {
+			cfg.AuditIndices = append(cfg.AuditIndices, idx)
+		}
+	} else {
+		if idx := findIndex(headers, true, fallbackUpdatedAt, fallbackModifiedAt); idx != -1 {
+			cfg.AuditIndices = append(cfg.AuditIndices, idx)
+		}
+	}
+
+	// Determine actual content mode to use
+	actualMode := mode
+	if mode == ContentModeAuto {
+		if len(cfg.UniqueIndices) > 0 && !cfg.IsSortColUnique {
+			actualMode = ContentModeAll
+		} else if cfg.IsSorted() {
+			actualMode = ContentModeLast
+		} else {
+			actualMode = ContentModeNone
+		}
+	}
+
+	var rows [][]string
+	var lastRow []string
+	rowCount := 0
+
+	// Scan remaining content for table rows with strict validation
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		if isTableRow(trimmed) {
+			cells, err := SplitGFMLine(line)
+			if err == nil {
+				if len(cells) != len(headers) {
+					return TableConfig{}, nil, fmt.Errorf("inconsistent column count: row has %d columns, expected %d", len(cells), len(headers))
+				}
+				rowCount++
+				if actualMode == ContentModeAll {
+					rows = append(rows, cells)
+				} else if actualMode == ContentModeLast {
+					lastRow = cells
+				}
+			}
+		} else {
+			// Once we hit a non-table line, GFM table ends
+			break
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return TableConfig{}, nil, err
+	}
+
+	cfg.RowCount = rowCount
+
+	if actualMode == ContentModeLast && lastRow != nil {
+		rows = [][]string{lastRow}
+	}
+
+	if IsDebug(ctx) {
+		if jsonBytes, err := json.MarshalIndent(cfg, "", "  "); err == nil {
+			fmt.Fprintf(os.Stderr, "DEBUG TableConfig:\n%s\n", string(jsonBytes))
+		} else {
+			fmt.Fprintf(os.Stderr, "DEBUG TableConfig: %+v\n", cfg)
+		}
+	}
+
+	return cfg, rows, nil
+}
+
+// SerializeConfig formats frontmatter config as valid YAML frontmatter under rowlite: root
+func SerializeConfig(cfg TableConfig) string {
+	if len(cfg.Unique) == 0 && cfg.Sort == "" && cfg.Audit.Insert == "" && cfg.Audit.Edit == "" && cfg.JournalLog == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString("rowlite:\n")
+	if len(cfg.Unique) > 0 {
+		sb.WriteString("  unique: [")
+		for i, u := range cfg.Unique {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(u)
+		}
+		sb.WriteString("]\n")
+	}
+	if cfg.Sort != "" {
+		sb.WriteString("  sort: ")
+		sb.WriteString(cfg.Sort)
+		sb.WriteByte('\n')
+	}
+	if cfg.Audit.Insert != "" || cfg.Audit.Edit != "" {
+		sb.WriteString("  audit:\n")
+		if cfg.Audit.Insert != "" {
+			sb.WriteString("    insert: \"")
+			sb.WriteString(cfg.Audit.Insert)
+			sb.WriteString("\"\n")
+		}
+		if cfg.Audit.Edit != "" {
+			sb.WriteString("    edit: \"")
+			sb.WriteString(cfg.Audit.Edit)
+			sb.WriteString("\"\n")
+		}
+	}
+	if cfg.JournalLog != "" {
+		sb.WriteString("  journal_log: ")
+		sb.WriteString(cfg.JournalLog)
+		sb.WriteByte('\n')
+	}
+	sb.WriteString("---\n")
+	return sb.String()
+}
+
+// CompareCells evaluates sorting ordering between two strings
+func CompareCells(a, b string) int {
+	fa, errA := strconv.ParseFloat(a, 64)
+	fb, errB := strconv.ParseFloat(b, 64)
+	if errA == nil && errB == nil {
+		if fa < fb {
+			return -1
+		}
+		if fa > fb {
+			return 1
+		}
+		return 0
+	}
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+// CompareRows compares two rows based on SortRules.
+// It returns:
+//   -1 if rowA < rowB
+//    1 if rowA > rowB
+//    0 if rowA == rowB
+func CompareRows(rowA, rowB []string, rules []SortRule) int {
+	for _, rule := range rules {
+		if rule.ColIdx >= len(rowA) || rule.ColIdx >= len(rowB) {
+			continue
+		}
+		valA := rowA[rule.ColIdx]
+		valB := rowB[rule.ColIdx]
+		cmp := CompareCells(valA, valB)
+		if cmp != 0 {
+			if rule.Dir == descSortDir {
+				return -cmp
+			}
+			return cmp
+		}
+	}
+	return 0
+}
+
+// SortRows stable-sorts rows in-place based on sort rules (e.g. "id:asc,priority:desc")
+func SortRows(headers []string, rows [][]string, sortRule string) error {
+	if sortRule == "" {
+		return nil
+	}
+
+	var rules []SortRule
+	rulesParts := strings.Split(sortRule, ",")
+	for _, part := range rulesParts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		parts := strings.SplitN(part, ":", 2)
+		colName := strings.TrimSpace(parts[0])
+		dir := defaultSortDir
+		if len(parts) > 1 {
+			dir = strings.ToLower(strings.TrimSpace(parts[1]))
+		}
+		colIdx := findIndex(headers, false, colName)
+		if colIdx == -1 {
+			return fmt.Errorf("sort column %q not found in table headers", colName)
+		}
+		rules = append(rules, SortRule{ColIdx: colIdx, Dir: dir})
+	}
+
+	sort.SliceStable(rows, func(i, j int) bool {
+		return CompareRows(rows[i], rows[j], rules) < 0
+	})
+
+	return nil
+}
+
+// WriteJournalRecord logs operation details into an append-only journal file
+func WriteJournalRecord(ctx context.Context, journalPath string, op string, payload map[string]string) error {
+	timestamp := time.Now().Format(timestampFormat)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err == nil && stat.Size() == 0 {
+		file.WriteString("| timestamp | operation | details |\n| --- | --- | --- |\n")
+	}
+
+	logRow := []string{timestamp, op, string(payloadBytes)}
+	_, err = file.WriteString(FormatGFMLine(logRow))
+	if err == nil {
+		_, err = file.WriteString("\n")
+	}
+	return err
+}
+
+// IsInsertAuditColumn checks if a column is an auto-filled creation timestamp column
+func IsInsertAuditColumn(colName string, cfg TableConfig) bool {
+	if cfg.Audit.Insert != "" && colName == cfg.Audit.Insert {
+		return true
+	}
+	lowerCol := strings.ToLower(colName)
+	if cfg.Audit.Insert == "" && (lowerCol == fallbackCreatedAt || lowerCol == fallbackInsertedAt) {
+		return true
+	}
+	return false
+}
+
+// IsEditAuditColumn checks if a column is an auto-filled modification timestamp column
+func IsEditAuditColumn(colName string, cfg TableConfig) bool {
+	if cfg.Audit.Edit != "" && colName == cfg.Audit.Edit {
+		return true
+	}
+	lowerCol := strings.ToLower(colName)
+	if cfg.Audit.Edit == "" && (lowerCol == fallbackUpdatedAt || lowerCol == fallbackModifiedAt) {
+		return true
+	}
+	return false
+}
+
+// IsAuditColumn checks if a column is an auto-filled audit column (explicit or zero-config fallback)
+func IsAuditColumn(colName string, cfg TableConfig) bool {
+	return IsInsertAuditColumn(colName, cfg) || IsEditAuditColumn(colName, cfg)
+}
+
+// InitTable writes or updates a GFM table with YAML frontmatter configuration
+func InitTable(ctx context.Context, filePath string, columns []string, cfg TableConfig) error {
+	if len(columns) == 0 {
+		return fmt.Errorf("columns list cannot be empty")
+	}
+
+	for _, u := range cfg.Unique {
+		found := false
+		for _, c := range columns {
+			if c == u {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("unique column %q not found in columns list", u)
+		}
+	}
+
+	if cfg.Sort != "" {
+		parts := strings.SplitN(cfg.Sort, ":", 2)
+		sortCol := strings.TrimSpace(parts[0])
+		found := false
+		for _, c := range columns {
+			if c == sortCol {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("sort column %q not found in columns list", sortCol)
+		}
+	}
+
+	// Build finalColumns by appending auto-generated audit columns to user columns list if not already present
+	var finalColumns []string
+	finalColumns = append(finalColumns, columns...)
+
+	if cfg.Audit.Insert != "" {
+		found := false
+		for _, c := range finalColumns {
+			if c == cfg.Audit.Insert {
+				found = true
+				break
+			}
+		}
+		if !found {
+			finalColumns = append(finalColumns, cfg.Audit.Insert)
+		}
+	}
+
+	if cfg.Audit.Edit != "" {
+		found := false
+		for _, c := range finalColumns {
+			if c == cfg.Audit.Edit {
+				found = true
+				break
+			}
+		}
+		if !found {
+			finalColumns = append(finalColumns, cfg.Audit.Edit)
+		}
+	}
+
+	var existingRows [][]string
+	var oldHeaders []string
+	var alignments []string
+	if _, err := os.Stat(filePath); err == nil {
+		cfgParsed, rows, parseErr := ParseFrontmatterAndContent(ctx, filePath, ContentModeAll)
+		if parseErr == nil {
+			existingRows = rows
+			oldHeaders = cfgParsed.Headers
+			alignments = cfgParsed.Alignments
+		}
+	}
+
+	if len(alignments) == 0 {
+		alignments = make([]string, len(finalColumns))
+		for i := range alignments {
+			alignments[i] = "---"
+		}
+	} else if len(alignments) != len(finalColumns) {
+		newAlignments := make([]string, len(finalColumns))
+		for i := range newAlignments {
+			if i < len(alignments) {
+				newAlignments[i] = alignments[i]
+			} else {
+				newAlignments[i] = "---"
+			}
+		}
+		alignments = newAlignments
+	}
+
+	cfg.Headers = finalColumns
+	cfg.Alignments = alignments
+	frontmatterStr := SerializeConfig(cfg)
+
+	tempPath := filePath + ".tmp"
+	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempPath)
+	}()
+
+	writer := bufio.NewWriter(tempFile)
+	if frontmatterStr != "" {
+		_, err = writer.WriteString(frontmatterStr)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = writer.WriteString(FormatGFMLine(finalColumns))
+	if err == nil {
+		_, err = writer.WriteString("\n")
+	}
+	if err != nil {
+		return err
+	}
+
+	_, err = writer.WriteString(FormatGFMLine(alignments))
+	if err == nil {
+		_, err = writer.WriteString("\n")
+	}
+	if err != nil {
+		return err
+	}
+
+	for _, row := range existingRows {
+		newRow := make([]string, len(finalColumns))
+		for i, col := range finalColumns {
+			oldIdx := -1
+			for j, oh := range oldHeaders {
+				if oh == col {
+					oldIdx = j
+					break
+				}
+			}
+			if oldIdx != -1 && oldIdx < len(row) {
+				newRow[i] = row[oldIdx]
+			} else {
+				newRow[i] = ""
+			}
+		}
+		_, err = writer.WriteString(FormatGFMLine(newRow))
+		if err == nil {
+			_, err = writer.WriteString("\n")
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	err = writer.Flush()
+	if err != nil {
+		return err
+	}
+	tempFile.Close()
+
+	return os.Rename(tempPath, filePath)
+}
+
+// ParseInputData parses a string as JSON or CSV into a list of row maps based on headers
+func ParseInputData(cfg TableConfig, input string) ([]map[string]string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty input data")
+	}
+
+	// Filter out auto-generated audit columns from the user positional inputs list
+	var userHeaders []string
+	for _, h := range cfg.Headers {
+		if !IsAuditColumn(h, cfg) {
+			userHeaders = append(userHeaders, h)
+		}
+	}
+
+	// Check if JSON object
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		var row map[string]string
+		err := json.Unmarshal([]byte(trimmed), &row)
+		if err != nil {
+			return nil, fmt.Errorf("invalid row JSON: %w", err)
+		}
+		return []map[string]string{row}, nil
+	}
+
+	// Check if JSON array
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		var rows []map[string]string
+		err := json.Unmarshal([]byte(trimmed), &rows)
+		if err != nil {
+			return nil, fmt.Errorf("invalid rows JSON array: %w", err)
+		}
+		return rows, nil
+	}
+
+	// Treat as CSV
+	reader := csv.NewReader(strings.NewReader(trimmed))
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("invalid CSV content: %w", err)
+	}
+
+	var rows []map[string]string
+	for recordIdx, record := range records {
+		if len(record) != len(userHeaders) {
+			return nil, fmt.Errorf("csv row %d has inconsistent column count: got %d, expected %d", recordIdx+1, len(record), len(userHeaders))
+		}
+		rowMap := make(map[string]string)
+		for i, h := range userHeaders {
+			rowMap[h] = record[i]
+		}
+		rows = append(rows, rowMap)
+	}
+
+	return rows, nil
+}
+
+// CheckUniqueness validates that the row does not violate uniqueness rules
+func CheckUniqueness(
+	row []string,
+	cfg TableConfig,
+	existingRows [][]string,
+	validatedRows [][]string,
+) error {
+	for _, colIdx := range cfg.UniqueIndices {
+		if colIdx >= len(row) {
+			continue
+		}
+		newVal := row[colIdx]
+
+		// Check against existing rows
+		for _, r := range existingRows {
+			if colIdx < len(r) {
+				existingVal := r[colIdx]
+				if existingVal == newVal {
+					return fmt.Errorf("duplicate key error: value %q for column %q already exists", newVal, cfg.Headers[colIdx])
+				}
+			}
+		}
+
+		// Check against previously validated rows in this batch
+		for _, r := range validatedRows {
+			if colIdx < len(r) {
+				batchVal := r[colIdx]
+				if batchVal == newVal {
+					return fmt.Errorf("duplicate key error: value %q for column %q already exists in append batch", newVal, cfg.Headers[colIdx])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// AppendRows appends multiple rows validating uniqueness, sorting, auditing, and change logging
+func AppendRows(
+	ctx context.Context,
+	filePath string,
+	cfg TableConfig,
+	existingRows [][]string,
+	newRows []map[string]string,
+) error {
+	if len(newRows) == 0 {
+		return nil
+	}
+
+	timestamp := time.Now().Format(timestampFormat)
+
+	// Pre-process and validate all new rows
+	var validatedRows [][]string
+	for _, rowMap := range newRows {
+		// Auto-stamp audit columns using the pre-resolved AuditIndices
+		for _, colIdx := range cfg.AuditIndices {
+			h := cfg.Headers[colIdx]
+			if rowMap[h] == "" {
+				rowMap[h] = timestamp
+			}
+		}
+
+		rowCells := make([]string, len(cfg.Headers))
+		for i, h := range cfg.Headers {
+			rowCells[i] = rowMap[h]
+		}
+
+		// Perform uniqueness checks
+		err := CheckUniqueness(rowCells, cfg, existingRows, validatedRows)
+		if err != nil {
+			return err
+		}
+
+		// Perform sorting checks if table has sort rules
+		if cfg.IsSorted() {
+			var lastRow []string
+			if len(validatedRows) > 0 {
+				lastRow = validatedRows[len(validatedRows)-1]
+			} else if len(existingRows) > 0 {
+				lastRow = existingRows[len(existingRows)-1]
+			}
+			if lastRow != nil {
+				cmp := CompareRows(lastRow, rowCells, cfg.SortRules)
+				if cfg.IsSortColUnique {
+					if cmp >= 0 {
+						return fmt.Errorf("unsorted append error: row is not strictly sorted after the previous row")
+					}
+				} else {
+					if cmp > 0 {
+						return fmt.Errorf("unsorted append error: row is not sorted after the previous row")
+					}
+				}
+			}
+		}
+
+		validatedRows = append(validatedRows, rowCells)
+	}
+
+	// Write phase - always append directly for performance
+	for _, rowCells := range validatedRows {
+		err := AppendRowDirectly(ctx, filePath, rowCells)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Logging journal
+	if cfg.JournalLog != "" {
+		for _, rowMap := range newRows {
+			_ = WriteJournalRecord(ctx, cfg.JournalLog, "APPEND", rowMap)
+		}
+	}
+
+	return nil
+}
+
+// Append parses the table and appends a raw input string (JSON/CSV)
+func Append(ctx context.Context, filePath string, input string) error {
+	cfg, existingRows, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeAuto)
+	if err != nil {
+		return err
+	}
+	parsedRows, err := ParseInputData(cfg, input)
+	if err != nil {
+		return err
+	}
+	return AppendRows(ctx, filePath, cfg, existingRows, parsedRows)
+}
+
+// AppendRow parses the table and appends a single parsed row map
+func AppendRow(ctx context.Context, filePath string, rowMap map[string]string) error {
+	cfg, existingRows, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeAuto)
+	if err != nil {
+		return err
+	}
+	return AppendRows(ctx, filePath, cfg, existingRows, []map[string]string{rowMap})
+}
+
+// SortTableAction sorts the table either one-time or triggers auto-sorting configuration updates
+func SortTableAction(ctx context.Context, filePath string, byRule string, trigger bool) error {
+	cfg, rows, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeAll)
+	if err != nil {
+		return err
+	}
+
+	sortRule := byRule
+	if sortRule == "" {
+		sortRule = cfg.Sort
+	}
+	if sortRule == "" {
+		return fmt.Errorf("no sort rule specified or configured in frontmatter")
+	}
+
+	if trigger {
+		cfg.Sort = sortRule
+		err = SortRows(cfg.Headers, rows, sortRule)
+		if err != nil {
+			return err
+		}
+		return InitTable(ctx, filePath, cfg.Headers, cfg)
+	}
+
+	err = SortRows(cfg.Headers, rows, sortRule)
+	if err != nil {
+		return err
+	}
+
+	return AtomicWriteTable(ctx, filePath, cfg, rows)
+}
+
+// Count returns the number of matching rows in the table
+func Count(ctx context.Context, filePath string, where []string) (int, error) {
+	var filters []Filter
+	for _, wf := range where {
+		flt, err := ParseFilter(wf)
+		if err != nil {
+			return 0, err
+		}
+		filters = append(filters, flt)
+	}
+
+	// Optimize: if no filters, we don't need to load any rows into memory!
+	mode := ContentModeNone
+	if len(filters) > 0 {
+		mode = ContentModeAll
+	}
+
+	cfg, rows, err := ParseFrontmatterAndContent(ctx, filePath, mode)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(filters) == 0 {
+		return cfg.RowCount, nil
+	}
+
+	// Count matching rows
+	count := 0
+	for _, row := range rows {
+		match := true
+		for _, flt := range filters {
+			m, err := EvaluateFilter(cfg.Headers, row, flt)
+			if err != nil {
+				return 0, err
+			}
+			if !m {
+				match = false
+				break
+			}
+		}
+		if match {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// findIndex searches for any of the target strings in headers and returns the index of the first match.
+// If caseInsensitive is true, it performs lowercase comparisons.
+func findIndex(headers []string, caseInsensitive bool, targets ...string) int {
+	for idx, h := range headers {
+		val := h
+		if caseInsensitive {
+			val = strings.ToLower(h)
+		}
+		for _, target := range targets {
+			cmpTarget := target
+			if caseInsensitive {
+				cmpTarget = strings.ToLower(target)
+			}
+			if val == cmpTarget {
+				return idx
+			}
+		}
+	}
+	return -1
+}
+
+type contextKey string
+
+const debugContextKey contextKey = "debug"
+
+// WithDebug returns a context indicating whether debug printing is enabled.
+func WithDebug(ctx context.Context, debug bool) context.Context {
+	return context.WithValue(ctx, debugContextKey, debug)
+}
+
+// IsDebug returns true if debug printing is enabled in the context.
+func IsDebug(ctx context.Context) bool {
+	val, ok := ctx.Value(debugContextKey).(bool)
+	return ok && val
+}

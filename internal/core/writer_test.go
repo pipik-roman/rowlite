@@ -1,8 +1,11 @@
-package core
+package core_test
 
 import (
+	"context"
 	"os"
 	"testing"
+
+	"github.com/roman-pipik/rowlite/internal/core"
 )
 
 func TestAppendRowDirectly(t *testing.T) {
@@ -20,7 +23,7 @@ func TestAppendRowDirectly(t *testing.T) {
 	}
 	tmpFile.Close()
 
-	err = AppendRowDirectly(tmpFile.Name(), []string{"2", "Bob"})
+	err = core.AppendRowDirectly(context.Background(), tmpFile.Name(), []string{"2", "Bob"})
 	if err != nil {
 		t.Fatalf("AppendRowDirectly() error = %v", err)
 	}
@@ -54,7 +57,7 @@ func TestAtomicWriteTable(t *testing.T) {
 		{"2", "Bob"},
 	}
 
-	err = AtomicWriteTable(tmpFile.Name(), TableConfig{}, headers, alignments, rows)
+	err = core.AtomicWriteTable(context.Background(), tmpFile.Name(), core.TableConfig{Headers: headers, Alignments: alignments}, rows)
 	if err != nil {
 		t.Fatalf("AtomicWriteTable() error = %v", err)
 	}

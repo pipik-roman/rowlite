@@ -9,9 +9,10 @@ func NewRootCmd() *cobra.Command {
 	var debugVal bool
 
 	cmd := &cobra.Command{
-		Use:   "rowlite",
-		Short: "Rowlite is a flat Markdown database CLI and MCP server",
-		Long:  `A zero-config, lightweight command line interface and MCP server to query and edit Markdown GFM tables.`,
+		Use:     "rowlite",
+		Version: "0.1.0",
+		Short:   "Rowlite is a flat Markdown database CLI and MCP server",
+		Long:    `A zero-config, lightweight command line interface and MCP server to query and edit Markdown GFM tables.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			debugFlag, err := cmd.Flags().GetBool("debug")
 			if err == nil {

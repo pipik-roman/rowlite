@@ -1,5 +1,8 @@
 # Binaries
 bin/
+dist/
+rowlite
+rowlite.exe
 *.exe
 *.exe~
 *.dll
@@ -21,4 +24,5 @@ bin/
 *.tmp
 *.log
 .agents/mcp_config.json
+
 

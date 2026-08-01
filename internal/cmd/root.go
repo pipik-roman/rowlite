@@ -22,7 +22,7 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.PersistentFlags().BoolVar(&debugVal, "debug", false, "print resolved TableConfig metadata")
+	cmd.PersistentFlags().BoolVar(&debugVal, "debug", false, "print detailed table scanning diagnostics and resolved table configuration metadata to stderr")
 
 	cmd.AddCommand(NewInitCmd())
 	cmd.AddCommand(NewListCmd())
@@ -31,6 +31,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(NewSortCmd())
 	cmd.AddCommand(NewStructureCmd())
 	cmd.AddCommand(NewMcpCmd())
+	cmd.AddCommand(NewSetupMCPCmd())
 
 	return cmd
 }

@@ -73,32 +73,35 @@ func FormatGFMLine(cells []string) string {
 	return buf.String()
 }
 
-// IsSeparatorLine checks if a parsed set of GFM cells corresponds to a table header separator.
-func IsSeparatorLine(cells []string) bool {
+// ValidateSeparatorLine checks if a parsed set of GFM cells corresponds to a table header separator.
+// Returns an error describing why validation failed if invalid, or nil if valid.
+func ValidateSeparatorLine(cells []string) error {
 	if len(cells) == 0 {
-		return false
+		return fmt.Errorf("separator row is empty")
 	}
-	for _, cell := range cells {
+	for i, cell := range cells {
 		trimmed := strings.TrimSpace(cell)
 		if len(trimmed) == 0 {
-			return false
+			return fmt.Errorf("column %d is empty and missing hyphens ('-')", i+1)
 		}
 		hasDash := false
-		for i := 0; i < len(trimmed); i++ {
-			c := trimmed[i]
+		for _, c := range trimmed {
 			if c == '-' {
 				hasDash = true
-			} else if c == ':' {
-				// Alignment marker, allowed
-			} else {
-				return false
+			} else if c != ':' {
+				return fmt.Errorf("column %d contains invalid character %q (only hyphens '-' and alignment colons ':' are allowed)", i+1, string(c))
 			}
 		}
 		if !hasDash {
-			return false
+			return fmt.Errorf("column %d is missing hyphens ('-')", i+1)
 		}
 	}
-	return true
+	return nil
+}
+
+// IsSeparatorLine checks if a parsed set of GFM cells corresponds to a table header separator.
+func IsSeparatorLine(cells []string) bool {
+	return ValidateSeparatorLine(cells) == nil
 }
 
 // ScanTableHeaders reads a file line-by-line and returns:
@@ -143,11 +146,15 @@ func ScanTableHeaders(ctx context.Context, filePath string) (headers []string, a
 		if isTableRow(trimmed) {
 			cells, parseErr := SplitGFMLine(line)
 			if parseErr == nil {
-				if lastCells != nil && IsSeparatorLine(cells) {
-					if len(cells) != len(lastCells) {
-						return nil, nil, 0, fmt.Errorf("separator row column count (%d) mismatch with header row column count (%d)", len(cells), len(lastCells))
+				if lastCells != nil {
+					sepErr := ValidateSeparatorLine(cells)
+					if sepErr == nil {
+						if len(cells) != len(lastCells) {
+							return nil, nil, 0, fmt.Errorf("separator row column count (%d) at line %d mismatch with header row column count (%d) at line %d", len(cells), lineNum, len(lastCells), lastLineNum)
+						}
+						return lastCells, cells, lastLineNum, nil
 					}
-					return lastCells, cells, lastLineNum, nil
+					return nil, nil, 0, fmt.Errorf("invalid separator row at line %d: %w", lineNum, sepErr)
 				}
 				lastCells = cells
 				lastLineNum = lineNum

@@ -27,7 +27,7 @@ func NewCountCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&whereFlags, whereFlagName, nil, "WHERE conditions")
+	cmd.Flags().StringSliceVar(&whereFlags, whereFlagName, nil, "WHERE conditions (supported operators: ==, !=, like, regex)")
 
 	return cmd
 }

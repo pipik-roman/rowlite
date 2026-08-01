@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/roman-pipik/rowlite/internal/core"
@@ -133,6 +134,50 @@ func TestIsSeparatorLine(t *testing.T) {
 	}
 }
 
+func TestValidateSeparatorLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		cells   []string
+		wantErr string
+	}{
+		{
+			name:    "plain hyphens",
+			cells:   []string{"---", "------"},
+			wantErr: "",
+		},
+		{
+			name:    "alignment colons",
+			cells:   []string{":---", ":---:", "---:"},
+			wantErr: "",
+		},
+		{
+			name:    "empty cell on column 2",
+			cells:   []string{"---", ""},
+			wantErr: "column 2 is empty and missing hyphens ('-')",
+		},
+		{
+			name:    "invalid character",
+			cells:   []string{"---", "---abc---"},
+			wantErr: "column 2 contains invalid character \"a\"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := core.ValidateSeparatorLine(tt.cells)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("ValidateSeparatorLine() unexpected error = %v", err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("ValidateSeparatorLine() error = %v, want substring %q", err, tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
 func TestScanTableHeaders(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "rowlite_test_*.md")
 	if err != nil {
@@ -165,5 +210,30 @@ func TestScanTableHeaders(t *testing.T) {
 	}
 	if lineNum != 2 {
 		t.Errorf("lineNum got = %d, want %d", lineNum, 2)
+	}
+}
+
+func TestScanTableHeaders_MalformedSeparator(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rowlite_test_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := `Header text
+| Id | Tags | Idea | Resources |
+|----|------|------| |
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	_, _, _, err = core.ScanTableHeaders(context.Background(), tmpFile.Name())
+	if err == nil {
+		t.Fatalf("Expected error for malformed separator row, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid separator row at line 3") || !strings.Contains(err.Error(), "column 4 is empty") {
+		t.Errorf("ScanTableHeaders() error = %v, want detailed line 3 error", err)
 	}
 }

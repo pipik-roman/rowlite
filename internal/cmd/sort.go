@@ -19,7 +19,11 @@ func NewSortCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sort <file>",
 		Short: "Sort table in-place",
-		Args:  cobra.ExactArgs(1),
+		Long: `Sort table in-place using a sort rule or pre-configured frontmatter sort settings.
+
+If --by is omitted, rowlite uses the frontmatter "sort" rule configured in the table.
+Multiple columns can be specified as a comma-separated list (e.g. "category:asc,priority:desc").`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath := args[0]
 
@@ -27,8 +31,8 @@ func NewSortCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&byRule, byFlagName, "", "override sort rule (e.g., id:desc)")
-	cmd.Flags().BoolVar(&trigger, triggerFlagName, false, "trigger sorting by updating frontmatter permanently")
+	cmd.Flags().StringVar(&byRule, byFlagName, "", "comma-separated sort rule override (e.g., \"category:asc,priority:desc\"); if omitted, frontmatter sort rule is used")
+	cmd.Flags().BoolVar(&trigger, triggerFlagName, false, "update frontmatter sort constraint permanently to trigger auto-sort on future writes")
 
 	return cmd
 }

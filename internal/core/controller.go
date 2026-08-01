@@ -113,9 +113,9 @@ func ParseFilter(expr string) (Filter, error) {
 
 // EvaluateFilter checks if a row cell matches the filter
 func EvaluateFilter(headers []string, row []string, filter Filter) (bool, error) {
-	colIdx := findIndex(headers, false, filter.Column)
-	if colIdx == -1 {
-		return false, fmt.Errorf("column %q not found in table headers", filter.Column)
+	colIdx, _, err := ResolveColumn(headers, filter.Column)
+	if err != nil {
+		return false, err
 	}
 	if colIdx >= len(row) {
 		return false, nil
@@ -168,13 +168,31 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 		raw = rawFrontmatter{}
 	}
 
+	// Calculate frontmatter line offset to ensure 1-based file line numbers
+	allBytes, _ := os.ReadFile(filePath)
+	totalLines := countLines(allBytes)
+	restLines := countLines(restBytes)
+	fmLineCount := 0
+	if totalLines >= restLines {
+		fmLineCount = totalLines - restLines
+	}
+
+	if IsDebug(ctx) {
+		fmt.Fprintf(os.Stderr, "DEBUG [table scan]: reading %s (frontmatter lines: %d, total lines: %d)\n", filePath, fmLineCount, totalLines)
+	}
+
 	scanner := bufio.NewScanner(bytes.NewReader(restBytes))
 	var headers []string
 	var alignments []string
+	headerLineNum := 0
+	lineInRest := 0
 	tableStarted := false
+	var lastTableErr error
 
 	// Find headers and alignments
 	for scanner.Scan() {
+		lineInRest++
+		lineNum := fmLineCount + lineInRest
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 
@@ -183,18 +201,48 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 			if err == nil {
 				if !tableStarted {
 					headers = cells
+					headerLineNum = lineNum
 					tableStarted = true
+					if IsDebug(ctx) {
+						fmt.Fprintf(os.Stderr, "DEBUG [table scan]: candidate table header found at line %d: %v\n", headerLineNum, headers)
+					}
 					continue
 				}
-				if len(alignments) == 0 && IsSeparatorLine(cells) {
-					alignments = cells
-					break
+				if len(alignments) == 0 {
+					if lineNum == headerLineNum+1 {
+						sepErr := ValidateSeparatorLine(cells)
+						if sepErr != nil {
+							if IsDebug(ctx) {
+								fmt.Fprintf(os.Stderr, "DEBUG [table scan]: separator validation failed at line %d: %v\n", lineNum, sepErr)
+							}
+							lastTableErr = fmt.Errorf("invalid separator row at line %d: %w", lineNum, sepErr)
+						} else if len(cells) != len(headers) {
+							if IsDebug(ctx) {
+								fmt.Fprintf(os.Stderr, "DEBUG [table scan]: column count mismatch at line %d (header has %d cols, separator has %d cols)\n", lineNum, len(headers), len(cells))
+							}
+							lastTableErr = fmt.Errorf("separator row column count (%d) at line %d mismatch with header row column count (%d) at line %d", len(cells), lineNum, len(headers), headerLineNum)
+						} else {
+							alignments = cells
+							if IsDebug(ctx) {
+								fmt.Fprintf(os.Stderr, "DEBUG [table scan]: valid table separator row found at line %d: %v\n", lineNum, alignments)
+							}
+							break
+						}
+					} else {
+						break
+					}
 				}
 			}
 		}
 	}
 
 	if len(headers) == 0 || len(alignments) == 0 {
+		if lastTableErr != nil {
+			return TableConfig{}, nil, fmt.Errorf("gfm table error in %s: %w", filePath, lastTableErr)
+		}
+		if tableStarted {
+			return TableConfig{}, nil, fmt.Errorf("gfm table error in %s: candidate header found at line %d, but no valid separator row followed", filePath, headerLineNum)
+		}
 		return TableConfig{}, nil, fmt.Errorf("gfm table headers and alignments not found in %s", filePath)
 	}
 
@@ -221,9 +269,9 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 			if len(parts) > 1 {
 				dir = strings.ToLower(strings.TrimSpace(parts[1]))
 			}
-			colIdx := findIndex(headers, false, sortColName)
-			if colIdx == -1 {
-				return TableConfig{}, nil, fmt.Errorf("sort column %q not found in table headers", sortColName)
+			colIdx, _, err := ResolveColumn(headers, sortColName)
+			if err != nil {
+				return TableConfig{}, nil, fmt.Errorf("sort column %w", err)
 			}
 			cfg.SortRules = append(cfg.SortRules, SortRule{ColIdx: colIdx, Dir: dir})
 		}
@@ -231,8 +279,8 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 
 	// Resolve derived Unique column indices
 	for _, u := range cfg.Unique {
-		colIdx := findIndex(headers, false, u)
-		if colIdx != -1 {
+		colIdx, _, err := ResolveColumn(headers, u)
+		if err == nil {
 			cfg.UniqueIndices = append(cfg.UniqueIndices, colIdx)
 		}
 	}
@@ -252,21 +300,25 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 
 	// Resolve derived Audit column indices
 	if cfg.Audit.Insert != "" {
-		if idx := findIndex(headers, false, cfg.Audit.Insert); idx != -1 {
+		if idx, _, err := ResolveColumn(headers, cfg.Audit.Insert); err == nil {
 			cfg.AuditIndices = append(cfg.AuditIndices, idx)
 		}
 	} else {
-		if idx := findIndex(headers, true, fallbackCreatedAt, fallbackInsertedAt); idx != -1 {
+		if idx, _, err := ResolveColumn(headers, fallbackCreatedAt); err == nil {
+			cfg.AuditIndices = append(cfg.AuditIndices, idx)
+		} else if idx, _, err := ResolveColumn(headers, fallbackInsertedAt); err == nil {
 			cfg.AuditIndices = append(cfg.AuditIndices, idx)
 		}
 	}
 
 	if cfg.Audit.Edit != "" {
-		if idx := findIndex(headers, false, cfg.Audit.Edit); idx != -1 {
+		if idx, _, err := ResolveColumn(headers, cfg.Audit.Edit); err == nil {
 			cfg.AuditIndices = append(cfg.AuditIndices, idx)
 		}
 	} else {
-		if idx := findIndex(headers, true, fallbackUpdatedAt, fallbackModifiedAt); idx != -1 {
+		if idx, _, err := ResolveColumn(headers, fallbackUpdatedAt); err == nil {
+			cfg.AuditIndices = append(cfg.AuditIndices, idx)
+		} else if idx, _, err := ResolveColumn(headers, fallbackModifiedAt); err == nil {
 			cfg.AuditIndices = append(cfg.AuditIndices, idx)
 		}
 	}
@@ -441,9 +493,9 @@ func SortRows(headers []string, rows [][]string, sortRule string) error {
 		if len(parts) > 1 {
 			dir = strings.ToLower(strings.TrimSpace(parts[1]))
 		}
-		colIdx := findIndex(headers, false, colName)
-		if colIdx == -1 {
-			return fmt.Errorf("sort column %q not found in table headers", colName)
+		colIdx, _, err := ResolveColumn(headers, colName)
+		if err != nil {
+			return fmt.Errorf("sort column %w", err)
 		}
 		rules = append(rules, SortRule{ColIdx: colIdx, Dir: dir})
 	}
@@ -484,11 +536,10 @@ func WriteJournalRecord(ctx context.Context, journalPath string, op string, payl
 
 // IsInsertAuditColumn checks if a column is an auto-filled creation timestamp column
 func IsInsertAuditColumn(colName string, cfg TableConfig) bool {
-	if cfg.Audit.Insert != "" && colName == cfg.Audit.Insert {
+	if cfg.Audit.Insert != "" && Normalize(colName) == Normalize(cfg.Audit.Insert) {
 		return true
 	}
-	lowerCol := strings.ToLower(colName)
-	if cfg.Audit.Insert == "" && (lowerCol == fallbackCreatedAt || lowerCol == fallbackInsertedAt) {
+	if cfg.Audit.Insert == "" && (Normalize(colName) == Normalize(fallbackCreatedAt) || Normalize(colName) == Normalize(fallbackInsertedAt)) {
 		return true
 	}
 	return false
@@ -496,11 +547,10 @@ func IsInsertAuditColumn(colName string, cfg TableConfig) bool {
 
 // IsEditAuditColumn checks if a column is an auto-filled modification timestamp column
 func IsEditAuditColumn(colName string, cfg TableConfig) bool {
-	if cfg.Audit.Edit != "" && colName == cfg.Audit.Edit {
+	if cfg.Audit.Edit != "" && Normalize(colName) == Normalize(cfg.Audit.Edit) {
 		return true
 	}
-	lowerCol := strings.ToLower(colName)
-	if cfg.Audit.Edit == "" && (lowerCol == fallbackUpdatedAt || lowerCol == fallbackModifiedAt) {
+	if cfg.Audit.Edit == "" && (Normalize(colName) == Normalize(fallbackUpdatedAt) || Normalize(colName) == Normalize(fallbackModifiedAt)) {
 		return true
 	}
 	return false
@@ -518,30 +568,18 @@ func InitTable(ctx context.Context, filePath string, columns []string, cfg Table
 	}
 
 	for _, u := range cfg.Unique {
-		found := false
-		for _, c := range columns {
-			if c == u {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("unique column %q not found in columns list", u)
+		_, _, err := ResolveColumn(columns, u)
+		if err != nil {
+			return fmt.Errorf("unique column %w", err)
 		}
 	}
 
 	if cfg.Sort != "" {
 		parts := strings.SplitN(cfg.Sort, ":", 2)
 		sortCol := strings.TrimSpace(parts[0])
-		found := false
-		for _, c := range columns {
-			if c == sortCol {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("sort column %q not found in columns list", sortCol)
+		_, _, err := ResolveColumn(columns, sortCol)
+		if err != nil {
+			return fmt.Errorf("sort column %w", err)
 		}
 	}
 
@@ -642,6 +680,7 @@ func InitTable(ctx context.Context, filePath string, columns []string, cfg Table
 		return err
 	}
 
+	var mappedRows [][]string
 	for _, row := range existingRows {
 		newRow := make([]string, len(finalColumns))
 		for i, col := range finalColumns {
@@ -658,7 +697,15 @@ func InitTable(ctx context.Context, filePath string, columns []string, cfg Table
 				newRow[i] = ""
 			}
 		}
-		_, err = writer.WriteString(FormatGFMLine(newRow))
+		mappedRows = append(mappedRows, newRow)
+	}
+
+	if cfg.Sort != "" {
+		_ = SortRows(finalColumns, mappedRows, cfg.Sort)
+	}
+
+	for _, row := range mappedRows {
+		_, err = writer.WriteString(FormatGFMLine(row))
 		if err == nil {
 			_, err = writer.WriteString("\n")
 		}
@@ -785,18 +832,30 @@ func AppendRows(
 
 	// Pre-process and validate all new rows
 	var validatedRows [][]string
+	var resolvedRows []map[string]string
 	for _, rowMap := range newRows {
+		// Map keys in rowMap (user inputs) to exact GFM headers using case-insensitive/normalized lookup
+		resolvedMap := make(map[string]string)
+		for k, v := range rowMap {
+			_, resolvedName, err := ResolveColumn(cfg.Headers, k)
+			if err == nil {
+				resolvedMap[resolvedName] = v
+			} else {
+				resolvedMap[k] = v
+			}
+		}
+
 		// Auto-stamp audit columns using the pre-resolved AuditIndices
 		for _, colIdx := range cfg.AuditIndices {
 			h := cfg.Headers[colIdx]
-			if rowMap[h] == "" {
-				rowMap[h] = timestamp
+			if resolvedMap[h] == "" {
+				resolvedMap[h] = timestamp
 			}
 		}
 
 		rowCells := make([]string, len(cfg.Headers))
 		for i, h := range cfg.Headers {
-			rowCells[i] = rowMap[h]
+			rowCells[i] = resolvedMap[h]
 		}
 
 		// Perform uniqueness checks
@@ -828,6 +887,7 @@ func AppendRows(
 		}
 
 		validatedRows = append(validatedRows, rowCells)
+		resolvedRows = append(resolvedRows, resolvedMap)
 	}
 
 	// Write phase - always append directly for performance
@@ -840,7 +900,7 @@ func AppendRows(
 
 	// Logging journal
 	if cfg.JournalLog != "" {
-		for _, rowMap := range newRows {
+		for _, rowMap := range resolvedRows {
 			_ = WriteJournalRecord(ctx, cfg.JournalLog, "APPEND", rowMap)
 		}
 	}
@@ -887,10 +947,6 @@ func SortTableAction(ctx context.Context, filePath string, byRule string, trigge
 
 	if trigger {
 		cfg.Sort = sortRule
-		err = SortRows(cfg.Headers, rows, sortRule)
-		if err != nil {
-			return err
-		}
 		return InitTable(ctx, filePath, cfg.Headers, cfg)
 	}
 
@@ -949,25 +1005,103 @@ func Count(ctx context.Context, filePath string, where []string) (int, error) {
 	return count, nil
 }
 
-// findIndex searches for any of the target strings in headers and returns the index of the first match.
-// If caseInsensitive is true, it performs lowercase comparisons.
-func findIndex(headers []string, caseInsensitive bool, targets ...string) int {
-	for idx, h := range headers {
-		val := h
-		if caseInsensitive {
-			val = strings.ToLower(h)
+// Normalize transforms a string into a canonical lowercase form stripping separators.
+// Example: "Item Name" -> "itemname", "item_name" -> "itemname"
+func Normalize(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, "-", "")
+	return s
+}
+
+// ResolveColumn finds the zero-based index of a column by name.
+// It tries: 1. Exact Match, 2. Case-Insensitive Match, 3. Normalized Match.
+func ResolveColumn(headers []string, target string) (int, string, error) {
+	// 1. Exact Match
+	for i, h := range headers {
+		if h == target {
+			return i, h, nil
 		}
-		for _, target := range targets {
-			cmpTarget := target
-			if caseInsensitive {
-				cmpTarget = strings.ToLower(target)
-			}
-			if val == cmpTarget {
-				return idx
+	}
+
+	// 2. Case-Insensitive Match
+	targetLower := strings.ToLower(target)
+	for i, h := range headers {
+		if strings.ToLower(h) == targetLower {
+			return i, h, nil
+		}
+	}
+
+	// 3. Normalized Match (ignores spaces, underscores, hyphens)
+	targetNorm := Normalize(target)
+	for i, h := range headers {
+		if Normalize(h) == targetNorm {
+			return i, h, nil
+		}
+	}
+
+	// 4. Failed: Return error with fuzzy suggestions and available columns
+	suggestion := getFuzzySuggestion(headers, target)
+	if suggestion != "" {
+		return -1, "", fmt.Errorf(
+			"column %q not found. Did you mean %q?\nAvailable columns: [%s]",
+			target,
+			suggestion,
+			strings.Join(headers, ", "),
+		)
+	}
+
+	return -1, "", fmt.Errorf(
+		"column %q not found. Available columns: [%s]",
+		target,
+		strings.Join(headers, ", "),
+	)
+}
+
+func getFuzzySuggestion(headers []string, target string) string {
+	targetLower := strings.ToLower(target)
+	bestDist := 3 // max edit distance threshold
+	var bestMatch string
+	for _, h := range headers {
+		hLower := strings.ToLower(h)
+		dist := levenshtein(targetLower, hLower)
+		if dist < bestDist {
+			bestDist = dist
+			bestMatch = h
+		}
+	}
+	return bestMatch
+}
+
+func levenshtein(s, t string) int {
+	d := make([][]int, len(s)+1)
+	for i := range d {
+		d[i] = make([]int, len(t)+1)
+	}
+	for i := range d {
+		d[i][0] = i
+	}
+	for j := range d[0] {
+		d[0][j] = j
+	}
+	for j := 1; j <= len(t); j++ {
+		for i := 1; i <= len(s); i++ {
+			if s[i-1] == t[j-1] {
+				d[i][j] = d[i-1][j-1]
+			} else {
+				min := d[i-1][j] + 1
+				if d[i][j-1]+1 < min {
+					min = d[i][j-1] + 1
+				}
+				if d[i-1][j-1]+1 < min {
+					min = d[i-1][j-1] + 1
+				}
+				d[i][j] = min
 			}
 		}
 	}
-	return -1
+	return d[len(s)][len(t)]
 }
 
 type contextKey string
@@ -983,4 +1117,15 @@ func WithDebug(ctx context.Context, debug bool) context.Context {
 func IsDebug(ctx context.Context) bool {
 	val, ok := ctx.Value(debugContextKey).(bool)
 	return ok && val
+}
+
+func countLines(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	n := bytes.Count(data, []byte("\n"))
+	if !bytes.HasSuffix(data, []byte("\n")) {
+		n++
+	}
+	return n
 }

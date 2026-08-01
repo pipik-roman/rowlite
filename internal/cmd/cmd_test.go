@@ -258,3 +258,193 @@ func TestDebugFlag(t *testing.T) {
 		t.Errorf("expected debug output to contain 'DEBUG TableConfig', got:\n%s", output)
 	}
 }
+
+func TestDebugFlag_MalformedTable(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "bad.md")
+
+	content := `---
+type: table
+---
+# Test Bad Table
+| Id | Tags | Idea | Resources |
+|----|------|------| |
+`
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write bad table file: %v", err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = w
+	defer func() {
+		os.Stderr = oldStderr
+	}()
+
+	rootCmd := silenceCmd(cmd.NewRootCmd())
+	rootCmd.SetArgs([]string{"list", dbPath, "--debug"})
+
+	execErr := rootCmd.Execute()
+	w.Close()
+
+	if execErr == nil {
+		t.Fatalf("expected execution to fail for malformed table, got nil")
+	}
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "DEBUG [table scan]: candidate table header found at line 5") {
+		t.Errorf("expected debug output to contain candidate header line info, got:\n%s", output)
+	}
+	if !strings.Contains(output, "DEBUG [table scan]: separator validation failed at line 6") {
+		t.Errorf("expected debug output to contain separator validation failure at line 6, got:\n%s", output)
+	}
+	if !strings.Contains(execErr.Error(), "invalid separator row at line 6: column 4 is empty and missing hyphens ('-')") {
+		t.Errorf("expected execErr to contain detailed line 6 error, got: %v", execErr)
+	}
+}
+
+func TestListCmdFormats(t *testing.T) {
+	dbPath := filepath.Join("testdata", "clean_table.md")
+
+	// 1. Test format "json"
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var jsonBuf bytes.Buffer
+	listCmd.SetOut(&jsonBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "json"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("json format list failed: %v", err)
+	}
+	jsonOut := jsonBuf.String()
+	if !strings.Contains(jsonOut, `"id": "101"`) || !strings.Contains(jsonOut, `"task": "Fix Auth"`) || !strings.Contains(jsonOut, `"status": "active"`) {
+		t.Errorf("expected JSON output containing fields, got: %s", jsonOut)
+	}
+
+	// 2. Test format "csv"
+	var csvBuf bytes.Buffer
+	listCmd = silenceCmd(cmd.NewListCmd())
+	listCmd.SetOut(&csvBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "csv"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("csv format list failed: %v", err)
+	}
+	csvOut := csvBuf.String()
+	if !strings.Contains(csvOut, "id,task,status\n") || !strings.Contains(csvOut, "101,Fix Auth,active\n") {
+		t.Errorf("expected CSV output, got: %s", csvOut)
+	}
+
+	// 3. Test format "tsv"
+	var tsvBuf bytes.Buffer
+	listCmd = silenceCmd(cmd.NewListCmd())
+	listCmd.SetOut(&tsvBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "tsv"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("tsv format list failed: %v", err)
+	}
+	tsvOut := tsvBuf.String()
+	if !strings.Contains(tsvOut, "id\ttask\tstatus\n") || !strings.Contains(tsvOut, "101\tFix Auth\tactive\n") {
+		t.Errorf("expected TSV output, got: %s", tsvOut)
+	}
+
+	// 4. Test format "pretty"
+	var prettyBuf bytes.Buffer
+	listCmd = silenceCmd(cmd.NewListCmd())
+	listCmd.SetOut(&prettyBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "pretty"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("pretty format list failed: %v", err)
+	}
+	prettyOut := prettyBuf.String()
+	// Box drawing characters should be present
+	if !strings.Contains(prettyOut, "┌") || !strings.Contains(prettyOut, "Fix Auth") || !strings.Contains(prettyOut, "└") {
+		t.Errorf("expected pretty table output with box characters, got: %s", prettyOut)
+	}
+
+	// 5. Test format "md"
+	var mdBuf bytes.Buffer
+	listCmd = silenceCmd(cmd.NewListCmd())
+	listCmd.SetOut(&mdBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "md"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("md format list failed: %v", err)
+	}
+	mdOut := mdBuf.String()
+	if !strings.Contains(mdOut, "| id | task | status |") {
+		t.Errorf("expected GFM table headers, got: %s", mdOut)
+	}
+
+	// 6. Test invalid format error
+	listCmd = silenceCmd(cmd.NewListCmd())
+	listCmd.SetArgs([]string{dbPath, "--format", "invalid_mode"})
+	if err := listCmd.Execute(); err == nil {
+		t.Fatal("expected error with invalid format, got nil")
+	} else if !strings.Contains(err.Error(), "invalid format:") {
+		t.Errorf("expected invalid format error, got: %v", err)
+	}
+
+	// 7. Test format "auto" falling back to GFM in non-TTY bytes.Buffer
+	var autoBuf bytes.Buffer
+	listCmd = silenceCmd(cmd.NewListCmd())
+	listCmd.SetOut(&autoBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "auto"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("auto format list failed: %v", err)
+	}
+	autoOut := autoBuf.String()
+	if !strings.Contains(autoOut, "| id | task | status |") {
+		t.Errorf("expected auto fallback to GFM Markdown table, got: %s", autoOut)
+	}
+}
+
+func TestRendererAlignments(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "align.md")
+
+	content := `---
+type: table
+---
+# Aligned Table
+| Left | Center | Right |
+| :--- | :---: | ---: |
+| L1   | C1     | R1    |
+`
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write align.md: %v", err)
+	}
+
+	// 1. Test pretty format alignment
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var prettyBuf bytes.Buffer
+	listCmd.SetOut(&prettyBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "pretty"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("pretty list failed: %v", err)
+	}
+	prettyOut := prettyBuf.String()
+	// Right-aligned column "Right" (width 5, val "R1"): 1 leading cell space + 3 pad spaces + R1
+	if !strings.Contains(prettyOut, "│    R1 │") {
+		t.Errorf("expected right-aligned value '│    R1 │' in pretty output, got:\n%s", prettyOut)
+	}
+	// Center-aligned column "Center" (width 6, val "C1"): leftPad 2, rightPad 2
+	if !strings.Contains(prettyOut, "│   C1   │") {
+		t.Errorf("expected center-aligned value '│   C1   │' in pretty output, got:\n%s", prettyOut)
+	}
+
+	// 2. Test md format alignment preservation
+	listCmd = silenceCmd(cmd.NewListCmd())
+	var mdBuf bytes.Buffer
+	listCmd.SetOut(&mdBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "md"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("md list failed: %v", err)
+	}
+	mdOut := mdBuf.String()
+	if !strings.Contains(mdOut, "| :--- | :---: | ---: |") {
+		t.Errorf("expected preserved alignments in md separator row, got:\n%s", mdOut)
+	}
+}

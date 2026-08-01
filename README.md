@@ -1,14 +1,14 @@
 # Rowlite
 
 Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, append (update, delete coming soon!).
-Instead of writing SQL queries, developers and AI agents interact with tabular data using simple, declarative actions (`list`, `append`, `update`, `delete`, `dedupe`) directly over columns.
+Instead of writing SQL queries or ad-hoc scripts, developers and AI agents interact with tabular data using simple, declarative actions (`list`, `append`, `update`, `delete`, `dedupe`) directly over columns.
 
 ## Why I created rowlite
 
 One day, I opened a precious Markdown table that was being managed by one of my LLM agents, and was quite surprised.
 There should be ~300 entries, but there were around 20.
 
-Because the agent was relying on fragile, ad-hoc scripts to update the file there was difference in table column count between rows. Some rows had five columns, others had six, and the parsing/writing logic simply ate my data without warning.
+Because the agent was relying on fragile, ad-hoc scripts to update the file, there was difference in table column count between rows. Some rows had five columns, others had six, and the parsing/writing logic simply ate my data without warning.
 
 I realized few things in that moment:
 
@@ -97,7 +97,8 @@ rowlite list tasks.md --where "Title regex ^[A-Z]"
 ## Roadmap
 Currently (2026-08-01) rowlite supports only bare minimum - append operation, simple query, count. Ideally markdown with table only.
 
-On the roadmap there is:
+Other features coming soon:
+- releases
 - delete row
 - edit row/cell
 - insert

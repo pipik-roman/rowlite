@@ -1,6 +1,6 @@
 # Rowlite
 
-Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, update, delete.
+Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, append (update, delete coming soon!).
 Instead of writing SQL queries, developers and AI agents interact with tabular data using simple, declarative actions (`list`, `append`, `update`, `delete`, `dedupe`) directly over columns.
 
 ## Why I created rowlite

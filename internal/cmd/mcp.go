@@ -11,7 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/roman-pipik/rowlite/internal/core"
+	"github.com/pipik-roman/rowlite/internal/core"
 )
 
 func NewMcpCmd() *cobra.Command {
@@ -21,7 +21,7 @@ func NewMcpCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			server := mcp.NewServer(&mcp.Implementation{
 				Name:    "rowlite",
-				Version: "1.0.0",
+				Version: Version,
 			}, nil)
 
 			type InitTableArgs struct {

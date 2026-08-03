@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/roman-pipik/rowlite/internal/cmd"
+	"github.com/pipik-roman/rowlite/internal/cmd"
 )
 
 func TestSetupMCPCmd_ExplicitClient(t *testing.T) {

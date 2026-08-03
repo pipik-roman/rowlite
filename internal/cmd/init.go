@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/roman-pipik/rowlite/internal/core"
+	"github.com/pipik-roman/rowlite/internal/core"
 )
 
 const (

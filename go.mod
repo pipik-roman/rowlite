@@ -1,4 +1,4 @@
-module github.com/roman-pipik/rowlite
+module github.com/pipik-roman/rowlite
 
 go 1.26.5
 

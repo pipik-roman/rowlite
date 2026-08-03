@@ -2,7 +2,13 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/roman-pipik/rowlite/internal/core"
+	"github.com/pipik-roman/rowlite/internal/core"
+)
+
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
 )
 
 func NewRootCmd() *cobra.Command {
@@ -10,7 +16,7 @@ func NewRootCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "rowlite",
-		Version: "0.1.0",
+		Version: Version,
 		Short:   "Rowlite is a flat Markdown database CLI and MCP server",
 		Long:    `A zero-config, lightweight command line interface and MCP server to query and edit Markdown GFM tables.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

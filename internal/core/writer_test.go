@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/roman-pipik/rowlite/internal/core"
+	"github.com/pipik-roman/rowlite/internal/core"
 )
 
 func TestAppendRowDirectly(t *testing.T) {

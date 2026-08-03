@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/roman-pipik/rowlite/internal/cmd"
+	"github.com/pipik-roman/rowlite/internal/cmd"
 )
 
 func silenceCmd(c *cobra.Command) *cobra.Command {

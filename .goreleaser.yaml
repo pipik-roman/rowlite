@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: rowlite
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: rowlite
+    main: ./cmd/rowlite
+    binary: rowlite
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/pipik-roman/rowlite/internal/cmd.Version={{.Version}}
+      - -X github.com/pipik-roman/rowlite/internal/cmd.Commit={{.Commit}}
+      - -X github.com/pipik-roman/rowlite/internal/cmd.Date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+sboms:
+  - id: default
+    artifacts: archive
+    cmd: syft
+    args:
+      - "$artifact"
+      - "--output"
+      - "spdx-json=$document"
+    documents:
+      - "${artifact}.spdx.json"
+
+signs:
+  - id: cosign-keyless
+    cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+
+release:
+  github:
+    owner: pipik-roman
+    name: rowlite
+  draft: false
+  prerelease: auto

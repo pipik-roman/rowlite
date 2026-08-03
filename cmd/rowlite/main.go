@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/roman-pipik/rowlite/internal/cmd"
+	"github.com/pipik-roman/rowlite/internal/cmd"
 )
 
 func main() {

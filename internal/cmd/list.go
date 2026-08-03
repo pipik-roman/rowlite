@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/roman-pipik/rowlite/internal/core"
+	"github.com/pipik-roman/rowlite/internal/core"
 )
 
 // TableRenderer defines the interface for formatting and printing table outputs.

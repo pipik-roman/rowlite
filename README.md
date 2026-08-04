@@ -38,14 +38,53 @@ And that is how rowlite was born.
 
 ## Quickstart
 
-### 1. Install Rowlite
-Install `rowlite` globally via Go:
+### 1. Installation
+Choose the installation method best suited for your environment:
+
+#### Method 1: Package Managers (Recommended)
+##### macOS & Linux (Homebrew)
+```bash
+brew tap pipik-roman/tap
+brew install rowlite
+```
+
+##### Windows (Scoop)
+```cmd
+scoop bucket add rowlite https://github.com/pipik-roman/scoop-bucket.git
+scoop install rowlite
+```
+
+#### Method 2: One-Line Install Scripts
+##### Linux & macOS (POSIX Shell)
+Quickly install the latest binary directly to `/usr/local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pipik-roman/rowlite/main/install.sh | sh
+```
+
+##### Windows (PowerShell)
+Installs automatically to `%LOCALAPPDATA%\Programs\rowlite` and configures your User `PATH`:
+
+```powershell
+irm https://raw.githubusercontent.com/pipik-roman/rowlite/main/install.ps1 | iex
+```
+
+#### Method 3: Pre-compiled Binaries
+1. Go to the [Releases Page](https://github.com/pipik-roman/rowlite/releases/latest).
+2. Download the appropriate archive for your operating system and CPU architecture:
+   - **Windows**: `rowlite_<version>_windows_amd64.zip` (or `arm64`)
+   - **macOS**: `rowlite_<version>_darwin_arm64.tar.gz` (Apple Silicon) or `darwin_amd64.tar.gz` (Intel)
+   - **Linux**: `rowlite_<version>_linux_amd64.tar.gz` (or `arm64`)
+3. Extract the archive and move the `rowlite` executable into a folder included in your system's `PATH`.
+
+#### Method 4: From Source (For Go Developers)
+If you have Go installed on your machine (1.23+):
 
 ```bash
 go install github.com/pipik-roman/rowlite/cmd/rowlite@latest
 ```
 
-Ensure your Go bin directory (typically `~/go/bin` or `%USERPROFILE%\go\bin`) is in your system's `PATH`.
+Ensure your Go bin directory (typically `~/go/bin` on Unix or `%USERPROFILE%\go\bin` on Windows) is in your system `PATH`.
 
 ### 2. Automatic MCP Setup
 Rowlite includes an interactive setup driver that automatically configures host AI tools (Cursor, VS Code, Copilot CLI, Claude Desktop, Antigravity, Zed, Cline, Crush, etc.):

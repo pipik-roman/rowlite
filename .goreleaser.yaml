@@ -69,3 +69,26 @@ release:
     name: rowlite
   draft: false
   prerelease: auto
+
+brews:
+  - name: rowlite
+    repository:
+      owner: pipik-roman
+      name: homebrew-tap
+      branch: main
+    homepage: "https://github.com/pipik-roman/rowlite"
+    description: "Markdown table manipulator CLI and stdio MCP server"
+    license: "MIT"
+    folder: Formula
+    skip_upload: auto
+
+scoops:
+  - name: rowlite
+    repository:
+      owner: pipik-roman
+      name: scoop-bucket
+      branch: main
+    homepage: "https://github.com/pipik-roman/rowlite"
+    description: "Markdown table manipulator CLI and stdio MCP server"
+    license: "MIT"
+    skip_upload: auto

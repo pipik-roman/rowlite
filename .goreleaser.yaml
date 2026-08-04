@@ -79,7 +79,7 @@ brews:
     homepage: "https://github.com/pipik-roman/rowlite"
     description: "Markdown table manipulator CLI and stdio MCP server"
     license: "MIT"
-    folder: Formula
+    directory: Formula
     skip_upload: auto
 
 scoops:

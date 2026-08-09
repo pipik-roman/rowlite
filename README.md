@@ -136,12 +136,19 @@ rowlite list tasks.md --where "Title regex ^[A-Z]"
 ## Roadmap
 Currently (2026-08-01) rowlite supports only bare minimum - append operation, simple query, count. Ideally markdown with table only.
 
-Other features coming soon:
-- releases
-- delete row
-- edit row/cell
-- insert
-- further improvements
+Other features/improvements coming soon:
+- auto increment column (next release)
+- update row/cell (next release)
+- journalling changes (next release)
+- MCP table metadata caching (next release)
+- delete row (future release)
+- releases to MCP directories (future release)
+- insert (future release)
+- views (auto-updated filtered copy of original table) (future release)
+
+Other planned improvements:
+
+
 
 ## Tech Stack
 - Built in **Go** (for performance).

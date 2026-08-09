@@ -34,12 +34,52 @@ type AuditConfig struct {
 	Edit   string `yaml:"edit,omitempty"`
 }
 
+// AutoIncrementConfig represents auto-increment column mapping and step
+type AutoIncrementConfig struct {
+	Column string `yaml:"column,omitempty"`
+	Step   int    `yaml:"step,omitempty"`
+}
+
+func (a *AutoIncrementConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var s string
+	if err := unmarshal(&s); err == nil {
+		col, step := parseAutoIncrementString(s)
+		a.Column = col
+		a.Step = step
+		return nil
+	}
+	type rawAutoInc AutoIncrementConfig
+	var raw rawAutoInc
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	*a = AutoIncrementConfig(raw)
+	return nil
+}
+
+func parseAutoIncrementString(s string) (string, int) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", 0
+	}
+	parts := strings.SplitN(s, ":", 2)
+	col := strings.TrimSpace(parts[0])
+	step := 1
+	if len(parts) > 1 {
+		if parsedStep, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && parsedStep > 0 {
+			step = parsedStep
+		}
+	}
+	return col, step
+}
+
 // RowliteConfig represents configurations nested under rowlite: namespace
 type RowliteConfig struct {
-	Unique      []string    `yaml:"unique,flow"`
-	Sort        string      `yaml:"sort,omitempty"`
-	Audit       AuditConfig `yaml:"audit,omitempty"`
-	JournalLog  string      `yaml:"journal_log,omitempty"`
+	Unique        []string            `yaml:"unique,flow"`
+	Sort          string              `yaml:"sort,omitempty"`
+	Audit         AuditConfig         `yaml:"audit,omitempty"`
+	JournalLog    string              `yaml:"journal_log,omitempty"`
+	AutoIncrement AutoIncrementConfig `yaml:"autoincrement,omitempty"`
 }
 
 // rawFrontmatter represents the raw YAML structure parsed from frontmatter
@@ -54,17 +94,20 @@ type SortRule struct {
 
 // TableConfig represents work-optimized runtime configurations and metadata
 type TableConfig struct {
-	Headers         []string
-	Alignments      []string
-	UniqueIndices   []int
-	AuditIndices    []int
-	SortRules       []SortRule
-	JournalLog      string
-	Unique          []string
-	Sort            string
-	Audit           AuditConfig
-	RowCount        int
-	IsSortColUnique bool
+	Headers          []string
+	Alignments       []string
+	UniqueIndices    []int
+	AuditIndices     []int
+	SortRules        []SortRule
+	JournalLog       string
+	Unique           []string
+	Sort             string
+	Audit            AuditConfig
+	AutoIncrement    AutoIncrementConfig
+	AutoIncrementIdx int
+	MaxAutoIncVal    int
+	RowCount         int
+	IsSortColUnique  bool
 }
 
 func (tc TableConfig) NumColumns() int {
@@ -73,6 +116,23 @@ func (tc TableConfig) NumColumns() int {
 
 func (tc TableConfig) IsSorted() bool {
 	return len(tc.SortRules) > 0
+}
+
+// IsSortedBy checks if the primary sort rule matches the given column name (case-insensitive) and direction (e.g. "asc" or "desc").
+// If sortingDir is empty, defaultSortDir ("asc") is used.
+func (tc TableConfig) IsSortedBy(colName string, sortingDir string) bool {
+	if len(tc.SortRules) == 0 {
+		return false
+	}
+	dir := strings.ToLower(strings.TrimSpace(sortingDir))
+	if dir == "" {
+		dir = defaultSortDir
+	}
+	colIdx, _, err := ResolveColumn(tc.Headers, colName)
+	if err != nil {
+		return false
+	}
+	return tc.SortRules[0].ColIdx == colIdx && tc.SortRules[0].Dir == dir
 }
 
 
@@ -247,12 +307,16 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 	}
 
 	cfg := TableConfig{
-		Headers:    headers,
-		Alignments: alignments,
-		JournalLog: raw.Rowlite.JournalLog,
-		Unique:     raw.Rowlite.Unique,
-		Sort:       raw.Rowlite.Sort,
-		Audit:      raw.Rowlite.Audit,
+		Headers:       headers,
+		Alignments:    alignments,
+		JournalLog:    raw.Rowlite.JournalLog,
+		Unique:        raw.Rowlite.Unique,
+		Sort:          raw.Rowlite.Sort,
+		Audit:         raw.Rowlite.Audit,
+		AutoIncrement: raw.Rowlite.AutoIncrement,
+	}
+	if cfg.AutoIncrement.Column != "" && cfg.AutoIncrement.Step <= 0 {
+		cfg.AutoIncrement.Step = 1
 	}
 
 	// Resolve derived Sort fields
@@ -323,6 +387,14 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 		}
 	}
 
+	// Resolve derived AutoIncrement column index
+	cfg.AutoIncrementIdx = -1
+	if cfg.AutoIncrement.Column != "" {
+		if idx, _, err := ResolveColumn(headers, cfg.AutoIncrement.Column); err == nil {
+			cfg.AutoIncrementIdx = idx
+		}
+	}
+
 	// Determine actual content mode to use
 	actualMode := mode
 	if mode == ContentModeAuto {
@@ -338,6 +410,7 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 	var rows [][]string
 	var lastRow []string
 	rowCount := 0
+	maxAutoIncVal := 0
 
 	// Scan remaining content for table rows with strict validation
 	for scanner.Scan() {
@@ -351,9 +424,15 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 					return TableConfig{}, nil, fmt.Errorf("inconsistent column count: row has %d columns, expected %d", len(cells), len(headers))
 				}
 				rowCount++
-				if actualMode == ContentModeAll {
+				if cfg.AutoIncrementIdx >= 0 && cfg.AutoIncrementIdx < len(cells) {
+					if v, err := strconv.Atoi(strings.TrimSpace(cells[cfg.AutoIncrementIdx])); err == nil && v > maxAutoIncVal {
+						maxAutoIncVal = v
+					}
+				}
+				switch actualMode {
+				case ContentModeAll:
 					rows = append(rows, cells)
-				} else if actualMode == ContentModeLast {
+				case ContentModeLast:
 					lastRow = cells
 				}
 			}
@@ -368,6 +447,7 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 	}
 
 	cfg.RowCount = rowCount
+	cfg.MaxAutoIncVal = maxAutoIncVal
 
 	if actualMode == ContentModeLast && lastRow != nil {
 		rows = [][]string{lastRow}
@@ -386,7 +466,7 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 
 // SerializeConfig formats frontmatter config as valid YAML frontmatter under rowlite: root
 func SerializeConfig(cfg TableConfig) string {
-	if len(cfg.Unique) == 0 && cfg.Sort == "" && cfg.Audit.Insert == "" && cfg.Audit.Edit == "" && cfg.JournalLog == "" {
+	if len(cfg.Unique) == 0 && cfg.Sort == "" && cfg.Audit.Insert == "" && cfg.Audit.Edit == "" && cfg.JournalLog == "" && cfg.AutoIncrement.Column == "" {
 		return ""
 	}
 	var sb strings.Builder
@@ -423,6 +503,18 @@ func SerializeConfig(cfg TableConfig) string {
 	if cfg.JournalLog != "" {
 		sb.WriteString("  journal_log: ")
 		sb.WriteString(cfg.JournalLog)
+		sb.WriteByte('\n')
+	}
+	if cfg.AutoIncrement.Column != "" {
+		step := cfg.AutoIncrement.Step
+		if step <= 0 {
+			step = 1
+		}
+		sb.WriteString("  autoincrement:\n")
+		sb.WriteString("    column: \"")
+		sb.WriteString(cfg.AutoIncrement.Column)
+		sb.WriteString("\"\n    step: ")
+		sb.WriteString(strconv.Itoa(step))
 		sb.WriteByte('\n')
 	}
 	sb.WriteString("---\n")
@@ -507,8 +599,93 @@ func SortRows(headers []string, rows [][]string, sortRule string) error {
 	return nil
 }
 
-// WriteJournalRecord logs operation details into an append-only journal file
-func WriteJournalRecord(ctx context.Context, journalPath string, op string, payload map[string]string) error {
+// ComputeRowKey derives the row key from unique columns or 1-based row index
+func ComputeRowKey(cfg TableConfig, rowIdx int, rowMap map[string]string) string {
+	if len(cfg.Unique) > 0 {
+		var parts []string
+		for _, uCol := range cfg.Unique {
+			for k, v := range rowMap {
+				if Normalize(k) == Normalize(uCol) {
+					parts = append(parts, v)
+					break
+				}
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, ":")
+		}
+	}
+	return strconv.Itoa(rowIdx)
+}
+
+func migrateJournalIfNeeded(journalPath string) error {
+	content, err := os.ReadFile(journalPath)
+	if err != nil || len(content) == 0 {
+		return nil
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if len(lines) == 0 {
+		return nil
+	}
+
+	headerLine := strings.TrimSpace(lines[0])
+	if !isTableRow(headerLine) {
+		return nil
+	}
+
+	headers, err := SplitGFMLine(headerLine)
+	if err != nil {
+		return nil
+	}
+
+	// Check if header has 3 columns: timestamp, operation, details
+	if len(headers) == 3 && Normalize(headers[0]) == "timestamp" && Normalize(headers[1]) == "operation" && Normalize(headers[2]) == "details" {
+		var newLines []string
+		newLines = append(newLines, "| timestamp | operation | row_key | details |")
+		newLines = append(newLines, "| --- | --- | --- | --- |")
+
+		rowIdx := 0
+		for i := 1; i < len(lines); i++ {
+			line := strings.TrimSpace(lines[i])
+			if line == "" || !isTableRow(line) {
+				continue
+			}
+			cells, err := SplitGFMLine(line)
+			if err != nil || len(cells) < 3 {
+				continue
+			}
+			if IsSeparatorLine(cells) {
+				continue
+			}
+			rowIdx++
+			ts := cells[0]
+			op := cells[1]
+			details := cells[2]
+
+			derivedKey := strconv.Itoa(rowIdx)
+			var payload map[string]interface{}
+			if jsonErr := json.Unmarshal([]byte(details), &payload); jsonErr == nil {
+				for _, k := range []string{"id", "tag", "key", "code", "slug"} {
+					if val, ok := payload[k]; ok && val != nil {
+						derivedKey = fmt.Sprintf("%v", val)
+						break
+					}
+				}
+			}
+
+			newLines = append(newLines, FormatGFMLine([]string{ts, op, derivedKey, details}))
+		}
+		newLines = append(newLines, "")
+		_ = os.WriteFile(journalPath, []byte(strings.Join(newLines, "\n")), 0644)
+	}
+	return nil
+}
+
+// WriteJournalRecord logs operation details into an append-only journal file with 4 columns
+func WriteJournalRecord(ctx context.Context, journalPath string, op string, rowKey string, payload map[string]string) error {
+	_ = migrateJournalIfNeeded(journalPath)
+
 	timestamp := time.Now().Format(timestampFormat)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -523,10 +700,10 @@ func WriteJournalRecord(ctx context.Context, journalPath string, op string, payl
 
 	stat, err := file.Stat()
 	if err == nil && stat.Size() == 0 {
-		file.WriteString("| timestamp | operation | details |\n| --- | --- | --- |\n")
+		file.WriteString("| timestamp | operation | row_key | details |\n| --- | --- | --- | --- |\n")
 	}
 
-	logRow := []string{timestamp, op, string(payloadBytes)}
+	logRow := []string{timestamp, op, rowKey, string(payloadBytes)}
 	_, err = file.WriteString(FormatGFMLine(logRow))
 	if err == nil {
 		_, err = file.WriteString("\n")
@@ -580,6 +757,13 @@ func InitTable(ctx context.Context, filePath string, columns []string, cfg Table
 		_, _, err := ResolveColumn(columns, sortCol)
 		if err != nil {
 			return fmt.Errorf("sort column %w", err)
+		}
+	}
+
+	if cfg.AutoIncrement.Column != "" {
+		_, _, err := ResolveColumn(columns, cfg.AutoIncrement.Column)
+		if err != nil {
+			return fmt.Errorf("autoincrement column %w", err)
 		}
 	}
 
@@ -830,6 +1014,12 @@ func AppendRows(
 
 	timestamp := time.Now().Format(timestampFormat)
 
+	currentMax := cfg.MaxAutoIncVal
+	var autoIncColName string
+	if cfg.AutoIncrementIdx >= 0 && cfg.AutoIncrementIdx < len(cfg.Headers) {
+		autoIncColName = cfg.Headers[cfg.AutoIncrementIdx]
+	}
+
 	// Pre-process and validate all new rows
 	var validatedRows [][]string
 	var resolvedRows []map[string]string
@@ -842,6 +1032,23 @@ func AppendRows(
 				resolvedMap[resolvedName] = v
 			} else {
 				resolvedMap[k] = v
+			}
+		}
+
+		// Fill auto-increment column if empty or update currentMax if explicit value is passed
+		if cfg.AutoIncrementIdx >= 0 {
+			if resolvedMap[autoIncColName] == "" {
+				step := cfg.AutoIncrement.Step
+				if step <= 0 {
+					step = 1
+				}
+				nextVal := currentMax + step
+				resolvedMap[autoIncColName] = strconv.Itoa(nextVal)
+				currentMax = nextVal
+			} else {
+				if v, err := strconv.Atoi(strings.TrimSpace(resolvedMap[autoIncColName])); err == nil && v > currentMax {
+					currentMax = v
+				}
 			}
 		}
 
@@ -900,8 +1107,10 @@ func AppendRows(
 
 	// Logging journal
 	if cfg.JournalLog != "" {
-		for _, rowMap := range resolvedRows {
-			_ = WriteJournalRecord(ctx, cfg.JournalLog, "APPEND", rowMap)
+		for i, rowMap := range resolvedRows {
+			rowIdx := len(existingRows) + i + 1
+			rowKey := ComputeRowKey(cfg, rowIdx, rowMap)
+			_ = WriteJournalRecord(ctx, cfg.JournalLog, "APPEND", rowKey, rowMap)
 		}
 	}
 

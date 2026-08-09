@@ -6,13 +6,65 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/pipik-roman/rowlite/internal/core"
 )
+
+type cachedTableConfig struct {
+	cfg     core.TableConfig
+	modTime time.Time
+}
+
+// TableConfigCache provides thread-safe in-memory caching of TableConfig by (filePath, modTime)
+type TableConfigCache struct {
+	mu    sync.RWMutex
+	items map[string]cachedTableConfig
+}
+
+func NewTableConfigCache() *TableConfigCache {
+	return &TableConfigCache{
+		items: make(map[string]cachedTableConfig),
+	}
+}
+
+func (c *TableConfigCache) GetOrParse(ctx context.Context, filePath string, mode core.ContentMode) (core.TableConfig, [][]string, error) {
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		return core.TableConfig{}, nil, err
+	}
+	modTime := stat.ModTime()
+
+	c.mu.RLock()
+	cached, ok := c.items[filePath]
+	c.mu.RUnlock()
+
+	if ok && cached.modTime.Equal(modTime) {
+		if mode == core.ContentModeNone {
+			return cached.cfg, nil, nil
+		}
+	}
+
+	cfg, rows, err := core.ParseFrontmatterAndContent(ctx, filePath, mode)
+	if err != nil {
+		return core.TableConfig{}, nil, err
+	}
+
+	c.mu.Lock()
+	c.items[filePath] = cachedTableConfig{
+		cfg:     cfg,
+		modTime: modTime,
+	}
+	c.mu.Unlock()
+
+	return cfg, rows, nil
+}
 
 func NewMcpCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -24,27 +76,46 @@ func NewMcpCmd() *cobra.Command {
 				Version: Version,
 			}, nil)
 
+			cache := NewTableConfigCache()
+
 			type InitTableArgs struct {
-				File        string   `json:"file" jsonschema:"path to the markdown file"`
-				Columns     []string `json:"columns,omitempty" jsonschema:"list of column names in order (optional for existing tables)"`
-				Unique      []string `json:"unique,omitempty" jsonschema:"columns that must be unique"`
-				Sort        string   `json:"sort,omitempty" jsonschema:"sort rule (e.g. id:asc)"`
-				AuditInsert string   `json:"audit_insert,omitempty" jsonschema:"custom name for creation timestamp column"`
-				AuditEdit   string   `json:"audit_edit,omitempty" jsonschema:"custom name for modification timestamp column"`
-				JournalLog  string   `json:"journal_log,omitempty" jsonschema:"path to change journal log file"`
+				File          string   `json:"file" jsonschema:"path to the markdown file"`
+				Columns       []string `json:"columns,omitempty" jsonschema:"list of column names in order (optional for existing tables)"`
+				Unique        []string `json:"unique,omitempty" jsonschema:"columns that must be unique"`
+				Sort          string   `json:"sort,omitempty" jsonschema:"sort rule (e.g. id:asc)"`
+				AuditInsert   string   `json:"audit_insert,omitempty" jsonschema:"custom name for creation timestamp column"`
+				AuditEdit     string   `json:"audit_edit,omitempty" jsonschema:"custom name for modification timestamp column"`
+				JournalLog    string   `json:"journal_log,omitempty" jsonschema:"path to change journal log file"`
+				AutoIncrement string   `json:"autoincrement,omitempty" jsonschema:"auto-increment column and optional step (e.g. id:10 or id)"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_init",
-				Description: "Initialize a new table structure or update frontmatter constraints in-place",
+				Description: "Initialize a new table structure or update frontmatter constraints in-place (supports unique keys, sort rules, audit_insert, audit_edit, journal_log, autoincrement)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args InitTableArgs) (*mcp.CallToolResult, any, error) {
+				autoIncCol, autoIncStep := "", 0
+				if args.AutoIncrement != "" {
+					parts := strings.SplitN(args.AutoIncrement, ":", 2)
+					autoIncCol = strings.TrimSpace(parts[0])
+					autoIncStep = 1
+					if len(parts) > 1 {
+						if step, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && step > 0 {
+							autoIncStep = step
+						}
+					}
+				}
+
 				cfg := core.TableConfig{
-					Unique:      args.Unique,
-					Sort:        args.Sort,
+					Unique: args.Unique,
+					Sort:   args.Sort,
 					Audit: core.AuditConfig{
 						Insert: args.AuditInsert,
 						Edit:   args.AuditEdit,
 					},
-					JournalLog:  args.JournalLog,
+					JournalLog: args.JournalLog,
+					AutoIncrement: core.AutoIncrementConfig{
+						Column: autoIncCol,
+						Step:   autoIncStep,
+					},
 				}
 
 				fileExists := false
@@ -57,7 +128,7 @@ func NewMcpCmd() *cobra.Command {
 					if !fileExists {
 						return nil, nil, fmt.Errorf("columns parameter is required when creating a new table")
 					}
-					cfgParsed, _, err := core.ParseFrontmatterAndContent(ctx, args.File, core.ContentModeNone)
+					cfgParsed, _, err := cache.GetOrParse(ctx, args.File, core.ContentModeNone)
 					if err != nil {
 						return nil, nil, fmt.Errorf("failed to parse existing table structure: %w", err)
 					}
@@ -71,7 +142,7 @@ func NewMcpCmd() *cobra.Command {
 					}
 				} else {
 					if fileExists {
-						cfgParsed, _, err := core.ParseFrontmatterAndContent(ctx, args.File, core.ContentModeNone)
+						cfgParsed, _, err := cache.GetOrParse(ctx, args.File, core.ContentModeNone)
 						if err == nil && len(cfgParsed.Headers) > 0 {
 							var existingUserCols []string
 							for _, h := range cfgParsed.Headers {
@@ -99,11 +170,11 @@ func NewMcpCmd() *cobra.Command {
 
 			type ListContentArgs struct {
 				File  string   `json:"file" jsonschema:"path to the markdown file"`
-				Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions"`
+				Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_list",
-				Description: "List matching rows from the markdown GFM table",
+				Description: "List matching rows from the markdown GFM table using optional WHERE filters (supports ==, !=, like, regex)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args ListContentArgs) (*mcp.CallToolResult, any, error) {
 				var filters []core.Filter
 				for _, wf := range args.Where {
@@ -114,14 +185,11 @@ func NewMcpCmd() *cobra.Command {
 					filters = append(filters, flt)
 				}
 
-				cfgParsed, rows, err := core.ParseFrontmatterAndContent(ctx, args.File, core.ContentModeAll)
+				cfgParsed, rows, err := cache.GetOrParse(ctx, args.File, core.ContentModeAll)
 				if err != nil {
 					return nil, nil, err
 				}
 				headers := cfgParsed.Headers
-				if err != nil {
-					return nil, nil, err
-				}
 
 				var sb strings.Builder
 				sb.WriteString(core.FormatGFMLine(headers))
@@ -160,11 +228,11 @@ func NewMcpCmd() *cobra.Command {
 
 			type CountContentArgs struct {
 				File  string   `json:"file" jsonschema:"path to the markdown file"`
-				Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions"`
+				Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_count",
-				Description: "Count matching rows from the markdown GFM table",
+				Description: "Count matching rows from the markdown GFM table using optional WHERE filters (supports ==, !=, like, regex)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args CountContentArgs) (*mcp.CallToolResult, any, error) {
 				count, err := core.Count(ctx, args.File, args.Where)
 				if err != nil {
@@ -184,7 +252,7 @@ func NewMcpCmd() *cobra.Command {
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_append",
-				Description: "Append a row to the GFM table (validates unique and sort frontmatter rules)",
+				Description: "Append a row to the GFM table (validates unique keys, applies auto-increment, updates audit timestamps, auto-sorts if configured, and logs to change journal)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args AppendRowArgs) (*mcp.CallToolResult, any, error) {
 				err := core.AppendRow(ctx, args.File, args.Row)
 				if err != nil {
@@ -204,7 +272,7 @@ func NewMcpCmd() *cobra.Command {
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_sort",
-				Description: "Sort the markdown GFM table in-place",
+				Description: "Sort the markdown GFM table in-place using a sort rule or pre-configured frontmatter sort settings",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args SortTableArgs) (*mcp.CallToolResult, any, error) {
 				err := core.SortTableAction(ctx, args.File, args.By, args.Trigger)
 				if err != nil {
@@ -222,9 +290,9 @@ func NewMcpCmd() *cobra.Command {
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_get_structure",
-				Description: "Display table column headers and frontmatter configurations",
+				Description: "Display table column headers, alignments, and frontmatter configurations (unique, sort, audit, journal_log, autoincrement)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args GetTableStructureArgs) (*mcp.CallToolResult, any, error) {
-				cfg, _, err := core.ParseFrontmatterAndContent(ctx, args.File, core.ContentModeNone)
+				cfg, _, err := cache.GetOrParse(ctx, args.File, core.ContentModeNone)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -248,6 +316,9 @@ func NewMcpCmd() *cobra.Command {
 				}
 				if cfg.JournalLog != "" {
 					sb.WriteString(fmt.Sprintf("Journal Log: %s\n", cfg.JournalLog))
+				}
+				if cfg.AutoIncrement.Column != "" {
+					sb.WriteString(fmt.Sprintf("AutoIncrement Column: %s (step: %d)\n", cfg.AutoIncrement.Column, cfg.AutoIncrement.Step))
 				}
 
 				return &mcp.CallToolResult{

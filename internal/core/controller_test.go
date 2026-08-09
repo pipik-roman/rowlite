@@ -501,3 +501,26 @@ func TestSortTableActionWithTrigger(t *testing.T) {
 	}
 }
 
+func TestIsSortedBy(t *testing.T) {
+	cfgWithRules := core.TableConfig{
+		Headers: []string{"id", "title", "priority"},
+		SortRules: []core.SortRule{
+			{ColIdx: 0, Dir: "asc"},
+			{ColIdx: 2, Dir: "desc"},
+		},
+	}
+
+	if !cfgWithRules.IsSortedBy("id", "asc") {
+		t.Error("expected IsSortedBy('id', 'asc') to be true")
+	}
+	if !cfgWithRules.IsSortedBy("id", "") {
+		t.Error("expected IsSortedBy('id', '') with default asc to be true")
+	}
+	if cfgWithRules.IsSortedBy("id", "desc") {
+		t.Error("expected IsSortedBy('id', 'desc') to be false")
+	}
+	if cfgWithRules.IsSortedBy("priority", "desc") {
+		t.Error("expected IsSortedBy('priority', 'desc') to be false (not primary sort column)")
+	}
+}
+

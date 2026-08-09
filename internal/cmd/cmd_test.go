@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pipik-roman/rowlite/internal/cmd"
+	"github.com/pipik-roman/rowlite/internal/core"
 )
 
 func silenceCmd(c *cobra.Command) *cobra.Command {
@@ -446,5 +448,44 @@ type: table
 	mdOut := mdBuf.String()
 	if !strings.Contains(mdOut, "| :--- | :---: | ---: |") {
 		t.Errorf("expected preserved alignments in md separator row, got:\n%s", mdOut)
+	}
+}
+
+func TestMCPConfigCache(t *testing.T) {
+	cache := cmd.NewTableConfigCache()
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "cache_test.md")
+	content := `---
+rowlite:
+  unique: [id]
+  autoincrement:
+    column: id
+    step: 5
+---
+| id | name |
+| --- | --- |
+| 5 | Alice |
+`
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// 1st call: parses and caches
+	cfg1, _, err := cache.GetOrParse(context.Background(), filePath, core.ContentModeNone)
+	if err != nil {
+		t.Fatalf("GetOrParse 1 failed: %v", err)
+	}
+	if cfg1.AutoIncrement.Column != "id" || cfg1.AutoIncrement.Step != 5 {
+		t.Errorf("unexpected AutoIncrement config: %+v", cfg1.AutoIncrement)
+	}
+
+	// 2nd call: cache hit (file not modified)
+	cfg2, _, err := cache.GetOrParse(context.Background(), filePath, core.ContentModeNone)
+	if err != nil {
+		t.Fatalf("GetOrParse 2 failed: %v", err)
+	}
+	if cfg2.AutoIncrement.Column != "id" || cfg2.AutoIncrement.Step != 5 {
+		t.Errorf("unexpected cached AutoIncrement config: %+v", cfg2.AutoIncrement)
 	}
 }

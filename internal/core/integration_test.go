@@ -338,3 +338,257 @@ func TestIntegration_CountFacade(t *testing.T) {
 		t.Errorf("expected filtered count 2, got = %d", todoCount)
 	}
 }
+
+func TestJournal4ColumnsAndRowKey(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "rowlite_journal_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tablePath := filepath.Join(tempDir, "table.md")
+	journalPath := filepath.Join(tempDir, "journal.md")
+
+	cfg := core.TableConfig{
+		Unique:     []string{"id"},
+		JournalLog: journalPath,
+	}
+
+	err = core.InitTable(context.Background(), tablePath, []string{"id", "title"}, cfg)
+	if err != nil {
+		t.Fatalf("InitTable failed: %v", err)
+	}
+
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"id": "100", "title": "First"})
+	if err != nil {
+		t.Fatalf("AppendRow failed: %v", err)
+	}
+
+	journalBytes, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatalf("ReadFile journal failed: %v", err)
+	}
+
+	journalStr := string(journalBytes)
+	if !strings.Contains(journalStr, "| timestamp | operation | row_key | details |") {
+		t.Errorf("journal header missing 4-column layout: %s", journalStr)
+	}
+	if !strings.Contains(journalStr, "| 100 |") {
+		t.Errorf("journal record missing expected row_key '100': %s", journalStr)
+	}
+}
+
+func TestAutoIncrementColumn(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "rowlite_autoinc_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tablePath := filepath.Join(tempDir, "tasks.md")
+	cfg := core.TableConfig{
+		AutoIncrement: core.AutoIncrementConfig{
+			Column: "id",
+			Step:   10,
+		},
+	}
+
+	err = core.InitTable(context.Background(), tablePath, []string{"id", "name"}, cfg)
+	if err != nil {
+		t.Fatalf("InitTable failed: %v", err)
+	}
+
+	// 1st append: omit id -> auto-increments to 10
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"name": "Task 1"})
+	if err != nil {
+		t.Fatalf("AppendRow 1 failed: %v", err)
+	}
+
+	// 2nd append: omit id -> auto-increments to 20
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"name": "Task 2"})
+	if err != nil {
+		t.Fatalf("AppendRow 2 failed: %v", err)
+	}
+
+	// 3rd append: explicit id = 50 -> preserves 50
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"id": "50", "name": "Task 3"})
+	if err != nil {
+		t.Fatalf("AppendRow 3 failed: %v", err)
+	}
+
+	// 4th append: omit id -> auto-increments to 60 (50 + 10)
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"name": "Task 4"})
+	if err != nil {
+		t.Fatalf("AppendRow 4 failed: %v", err)
+	}
+
+	cfgParsed, rows, err := core.ParseFrontmatterAndContent(context.Background(), tablePath, core.ContentModeAll)
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent failed: %v", err)
+	}
+
+	if cfgParsed.AutoIncrement.Column != "id" || cfgParsed.AutoIncrement.Step != 10 {
+		t.Errorf("AutoIncrement config mismatch: got %+v", cfgParsed.AutoIncrement)
+	}
+
+	expectedIds := []string{"10", "20", "50", "60"}
+	if len(rows) != len(expectedIds) {
+		t.Fatalf("expected %d rows, got %d", len(expectedIds), len(rows))
+	}
+	for i, r := range rows {
+		if r[0] != expectedIds[i] {
+			t.Errorf("row %d id mismatch: got %s, want %s", i, r[0], expectedIds[i])
+		}
+	}
+}
+
+func TestJournal3To4ColumnMigration(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "rowlite_journal_mig_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tablePath := filepath.Join(tempDir, "table.md")
+	journalPath := filepath.Join(tempDir, "journal.md")
+
+	// Create legacy 3-column journal file
+	legacyContent := `| timestamp | operation | details |
+| --- | --- | --- |
+| 2026-08-08 06:17:21 | APPEND | {"tag":"COAR","shortcut":"cr","next_seq":" 0003"} |
+| 2026-08-08 06:17:21 | APPEND | {"tag":"DOMAIL","shortcut":"dm","next_seq":" 0038"} |
+`
+	if err := os.WriteFile(journalPath, []byte(legacyContent), 0644); err != nil {
+		t.Fatalf("WriteFile journal failed: %v", err)
+	}
+
+	cfg := core.TableConfig{
+		Unique:     []string{"tag"},
+		JournalLog: journalPath,
+	}
+	if err := core.InitTable(context.Background(), tablePath, []string{"tag", "shortcut", "next_seq"}, cfg); err != nil {
+		t.Fatalf("InitTable failed: %v", err)
+	}
+
+	// Trigger new append
+	if err := core.AppendRow(context.Background(), tablePath, map[string]string{"tag": "ROWLITE", "shortcut": "rl", "next_seq": "0004"}); err != nil {
+		t.Fatalf("AppendRow failed: %v", err)
+	}
+
+	migratedBytes, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	migratedStr := string(migratedBytes)
+
+	if !strings.Contains(migratedStr, "| timestamp | operation | row_key | details |") {
+		t.Errorf("expected 4-column header, got:\n%s", migratedStr)
+	}
+	if !strings.Contains(migratedStr, "| 2026-08-08 06:17:21 | APPEND | COAR |") {
+		t.Errorf("expected legacy entry to be migrated with row_key 'COAR', got:\n%s", migratedStr)
+	}
+	if !strings.Contains(migratedStr, "| APPEND | ROWLITE |") {
+		t.Errorf("expected new entry with row_key 'ROWLITE', got:\n%s", migratedStr)
+	}
+}
+
+func TestAutoIncrementWithSortLast(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "rowlite_autoinc_sort_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tablePath := filepath.Join(tempDir, "tasks.md")
+	cfg := core.TableConfig{
+		Unique: []string{"id"},
+		Sort:   "id:asc",
+		AutoIncrement: core.AutoIncrementConfig{
+			Column: "id",
+			Step:   10,
+		},
+	}
+
+	err = core.InitTable(context.Background(), tablePath, []string{"id", "title"}, cfg)
+	if err != nil {
+		t.Fatalf("InitTable failed: %v", err)
+	}
+
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"title": "First"})
+	if err != nil {
+		t.Fatalf("Append 1 failed: %v", err)
+	}
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"title": "Second"})
+	if err != nil {
+		t.Fatalf("Append 2 failed: %v", err)
+	}
+
+	cfgParsed, rows, err := core.ParseFrontmatterAndContent(context.Background(), tablePath, core.ContentModeAll)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(rows) != 2 || rows[0][0] != "10" || rows[1][0] != "20" {
+		t.Errorf("unexpected rows content: %v", rows)
+	}
+	if cfgParsed.MaxAutoIncVal != 20 {
+		t.Errorf("expected MaxAutoIncVal = 20, got = %d", cfgParsed.MaxAutoIncVal)
+	}
+}
+
+func TestAutoIncrementEmptyTable(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "rowlite_autoinc_empty_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tablePath := filepath.Join(tempDir, "tasks.md")
+	cfg := core.TableConfig{
+		AutoIncrement: core.AutoIncrementConfig{
+			Column: "id",
+			Step:   10,
+		},
+	}
+
+	err = core.InitTable(context.Background(), tablePath, []string{"id", "title"}, cfg)
+	if err != nil {
+		t.Fatalf("InitTable failed: %v", err)
+	}
+
+	// 1. Verify ParseFrontmatterAndContent on empty table
+	cfgParsed, rows, err := core.ParseFrontmatterAndContent(context.Background(), tablePath, core.ContentModeAll)
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent failed: %v", err)
+	}
+
+	if cfgParsed.RowCount != 0 {
+		t.Errorf("expected RowCount = 0, got = %d", cfgParsed.RowCount)
+	}
+	if cfgParsed.MaxAutoIncVal != 0 {
+		t.Errorf("expected MaxAutoIncVal = 0 for empty table, got = %d", cfgParsed.MaxAutoIncVal)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected 0 rows, got = %d", len(rows))
+	}
+
+	// 2. Append first row -> should get id = 0 + 10 = 10
+	err = core.AppendRow(context.Background(), tablePath, map[string]string{"title": "First Item"})
+	if err != nil {
+		t.Fatalf("AppendRow failed: %v", err)
+	}
+
+	cfgAfter, rowsAfter, err := core.ParseFrontmatterAndContent(context.Background(), tablePath, core.ContentModeAll)
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent after append failed: %v", err)
+	}
+
+	if cfgAfter.RowCount != 1 {
+		t.Errorf("expected RowCount = 1, got = %d", cfgAfter.RowCount)
+	}
+	if cfgAfter.MaxAutoIncVal != 10 {
+		t.Errorf("expected MaxAutoIncVal = 10 after 1st append, got = %d", cfgAfter.MaxAutoIncVal)
+	}
+	if len(rowsAfter) != 1 || rowsAfter[0][0] != "10" {
+		t.Errorf("expected first row id to be 10, got = %v", rowsAfter)
+	}
+}

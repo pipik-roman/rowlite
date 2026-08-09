@@ -27,14 +27,15 @@ And that is how rowlite was born.
 - **Double-Agent Design**: Fast, native CLI commands for your terminal, and an out-of-the-box MCP server for your AI agents.
 
 ## Features
-- **Zero-config by default**: Works with standard markdown table, no configuration needed. If you need to simple CRUD, just use it.
-- **Frontmatter-customization**: Advanced features can be triggered through frontmatter fields.
+- **Zero-config by default**: Works with standard markdown table, no configuration needed. If you need simple CRUD, just use it.
+- **Frontmatter-customization**: Advanced features can be triggered through frontmatter fields (`unique`, `sort`, `audit`, `journal_log`, `autoincrement`).
+- **Auto-increment columns**: Automatically generate sequential integer IDs (e.g. `id:10` or `id:1`) for omitted cells on append.
 - **In-place updates**: Safely edits Markdown GFM tables without disturbing surrounding headings, notes, or descriptions in the document.
-- **Sorting and deduplication**: Declare primary columns and sorting columns for simple constrints and ordering.
+- **Sorting and deduplication**: Declare primary columns and sorting columns for simple constraints and ordering.
 - **Append**: Simple operation to append new row at the end, ideal for logging tables, preventing find-and-replace issues and inefficiency AI agents tend to have.
-- **Auditing-info**: Let insert/update timestamps on rowlite
-- **Model Context Protocol native**: Fully compatible with the MCP specification for seamless integration with AI agent loops (Cursor, Claude Code, etc.).
-- **Journal log**: Want to feel safe? Rowlite can write journal entries to additional file
+- **Auditing-info**: Automatic `created_at` / `updated_at` timestamps on rowlite operations.
+- **Model Context Protocol native**: Fully compatible with the MCP specification for seamless integration with AI agent loops (Cursor, Claude Code, Antigravity, etc.) with thread-safe `TableConfig` caching.
+- **4-Column Journal log**: Audit table change events to append-only `.log` files (`| timestamp | operation | row_key | details |`).
 
 ## Quickstart
 
@@ -104,7 +105,7 @@ rowlite mcp-setup --client copilot
 
 ## CLI Commands
 - `rowlite help` - See CLI help for details
-- `rowlite init <file>` - Create new markdown file with table or update current settings for existing file/table. 
+- `rowlite init <file> [--columns "id,name"] [--unique "id"] [--sort "id:asc"] [--autoincrement "id:10"] [--journal-log "journal.log"]` - Create new markdown table file or update frontmatter constraints in-place. 
 - `rowlite structure <file>` - Display column names, constraints, and audit log mappings.
 - `rowlite list <file> --where "<column> <op> <value>"` - Query and filter rows.
 - `rowlite count <file> --where "<column> <op> <value>"` - Count queried or filtered rows.

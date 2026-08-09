@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,18 +19,20 @@ const (
 	auditInsertFlag    = "audit-insert"
 	auditEditFlag      = "audit-edit"
 	journalLogFlag     = "journal-log"
+	autoincrementFlag  = "autoincrement"
 	defaultAuditInsert = "created_at"
 	defaultAuditEdit   = "updated_at"
 )
 
 func NewInitCmd() *cobra.Command {
 	var (
-		columnsVal     string
-		uniqueVal      string
-		sortVal        string
-		auditInsertVal string
-		auditEditVal   string
-		journalVal     string
+		columnsVal       string
+		uniqueVal        string
+		sortVal          string
+		auditInsertVal   string
+		auditEditVal     string
+		journalVal       string
+		autoincrementVal string
 	)
 	cmd := &cobra.Command{
 		Use:   "init <file>",
@@ -46,14 +49,30 @@ func NewInitCmd() *cobra.Command {
 				}
 			}
 
+			autoIncCol, autoIncStep := "", 0
+			if autoincrementVal != "" {
+				parts := strings.SplitN(autoincrementVal, ":", 2)
+				autoIncCol = strings.TrimSpace(parts[0])
+				autoIncStep = 1
+				if len(parts) > 1 {
+					if step, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && step > 0 {
+						autoIncStep = step
+					}
+				}
+			}
+
 			cfg := core.TableConfig{
-				Unique:      unique,
-				Sort:        sortVal,
+				Unique: unique,
+				Sort:   sortVal,
 				Audit: core.AuditConfig{
 					Insert: auditInsertVal,
 					Edit:   auditEditVal,
 				},
-				JournalLog:  journalVal,
+				JournalLog: journalVal,
+				AutoIncrement: core.AutoIncrementConfig{
+					Column: autoIncCol,
+					Step:   autoIncStep,
+				},
 			}
 
 			fileExists := false
@@ -115,7 +134,8 @@ func NewInitCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&auditEditVal, auditEditFlag, "", "enable modification timestamp auditing with custom column name")
 	cmd.Flags().Lookup(auditEditFlag).NoOptDefVal = defaultAuditEdit
-	cmd.Flags().StringVar(&journalVal, journalLogFlag, "", "path to change journal log file")
+	cmd.Flags().StringVar(&journalVal, journalLogFlag, "", "path to change journal log file (logs 4-column change history: timestamp, operation, row_key, details)")
+	cmd.Flags().StringVar(&autoincrementVal, autoincrementFlag, "", "auto-increment column and optional step (e.g. id:10 or id)")
 
 	return cmd
 }

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pipik-roman/rowlite",
+  "title": "Rowlite MCP Server",
+  "description": "Go-based MCP server providing Markdown table file inspection and row-level operations.",
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/pipik-roman/rowlite/releases/download/v0.1.2/rowlite_0.1.2_linux_amd64.tar.gz?mcp=1",
+      "fileSha256": "43e27840fbd7387e368b0aa7ce3855d8f845880f62e06eea33bb34825a6d1678",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

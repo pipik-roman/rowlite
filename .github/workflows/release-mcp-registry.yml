@@ -1,0 +1,91 @@
+name: Publish to MCP Registry
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git release tag (e.g. v0.1.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-mcp-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Parse Version & Release Tag
+        id: parse_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          SEMVER="${TAG#v}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "semver=${SEMVER}" >> $GITHUB_OUTPUT
+
+      - name: Fetch Release Asset Checksum
+        id: fetch_checksum
+        run: |
+          TAG="${{ steps.parse_version.outputs.tag }}"
+          CHECKSUM_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/checksums.txt"
+          echo "Fetching checksums from ${CHECKSUM_URL}..."
+          curl -sL "${CHECKSUM_URL}" -o checksums.txt
+          SHA256=$(grep "linux_amd64.tar.gz" checksums.txt | awk '{print $1}')
+          if [ -z "${SHA256}" ]; then
+            echo "Error: SHA256 for linux_amd64.tar.gz not found in checksums.txt"
+            exit 1
+          fi
+          echo "sha256=${SHA256}" >> $GITHUB_OUTPUT
+
+      - name: Generate Dynamic server.json
+        run: |
+          TAG="${{ steps.parse_version.outputs.tag }}"
+          SEMVER="${{ steps.parse_version.outputs.semver }}"
+          SHA256="${{ steps.parse_version.outputs.sha256 }}"
+          REPO="${{ github.repository }}"
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
+
+          cat << EOF > server.json
+          {
+            "\$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+            "name": "io.github.${REPO_LOWER}",
+            "title": "Rowlite MCP Server",
+            "description": "Go-based MCP server providing Markdown table file inspection and row-level operations.",
+            "version": "${SEMVER}",
+            "packages": [
+              {
+                "registryType": "mcpb",
+                "identifier": "https://github.com/${REPO}/releases/download/${TAG}/rowlite_${SEMVER}_linux_amd64.tar.gz?mcp=1",
+                "fileSha256": "${SHA256}",
+                "transport": {
+                  "type": "stdio"
+                }
+              }
+            ]
+          }
+          EOF
+          cat server.json
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          chmod +x mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: Validate server.json Manifest
+        run: mcp-publisher validate
+
+      - name: Authenticate via GitHub OIDC & Publish
+        run: |
+          mcp-publisher login github-oidc
+          mcp-publisher publish

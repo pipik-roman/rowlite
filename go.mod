@@ -2,7 +2,6 @@ module github.com/pipik-roman/rowlite
 
 go 1.26.6
 
-
 require (
 	github.com/adrg/frontmatter v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1

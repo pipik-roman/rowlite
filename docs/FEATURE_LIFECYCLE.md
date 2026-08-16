@@ -72,7 +72,16 @@ Every capability must be exposed consistently across both interaction models:
   - Ensure all unit and integration tests run cleanly on CI (`ubuntu-latest`).
 * **Zero-Bloat Dependency Footprint**:
   - Rely on the Go standard library wherever possible. Avoid adding unnecessary external packages to `go.mod`.
-* **Cross-Platform Verification**:
-  - Ensure path handling, line endings, and file locking work reliably across Windows, macOS, and Linux.
+* **Local Release & Cross-Compilation Test**:
+  - Run a local release dry-run before pushing major features or tagging releases:
+    ```bash
+    # 1. Validate GoReleaser syntax and configuration
+    goreleaser check
+
+    # 2. Build local snapshot across all target platforms (Linux, macOS, Windows)
+    goreleaser build --snapshot --clean
+    ```
+  - Verifies that cross-compilation targets (`darwin/amd64`, `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`) compile cleanly without OS-specific breakage.
 * **Release Configurations**:
   - Keep [`.goreleaser.yaml`](../.goreleaser.yaml) and MCP Registry workflows ([`.github/workflows/release-mcp-registry.yml`](../.github/workflows/release-mcp-registry.yml)) aligned with build matrix and manifest schema requirements.
+

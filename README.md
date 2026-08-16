@@ -37,20 +37,6 @@ And that is how rowlite was born.
 - **Model Context Protocol native**: Fully compatible with the MCP specification for seamless integration with AI agent loops (Cursor, Claude Code, Antigravity, etc.) with thread-safe `TableConfig` caching.
 - **4-Column Journal log**: Audit table change events to append-only `.log` files (`| timestamp | operation | row_key | details |`).
 
-## ⚡ Performance
-
-Built in Go for speed, low memory overhead, and zero external dependencies. `rowlite` executes operations on tens of thousands of rows in milliseconds:
-
-| Dataset | Operation | End-to-End Time (Disk $\rightarrow$ Result) | In-Memory / Cached |
-| :--- | :--- | :--- | :--- |
-| **10,000 rows** (1.25 MB) | Exact Match Query (`--where`) | **~13.0 ms** | **~0.19 ms** |
-| **10,000 rows** (1.25 MB) | Row Append (Auto-Increment + Audit) | **~15.2 ms** | — |
-| **10,000 rows** (1.25 MB) | Fast-Path Count (zero filters) | **~14.3 ms** | — |
-| **10,000 rows** (1.25 MB) | Unicode Substring Search (`like`) | **~16.5 ms** | **~2.46 ms** |
-| **10,000 rows** (1.25 MB) | Full Table In-Place Sort | **~32.0 ms** | **~20.4 ms** |
-
-> For complete end-to-end and in-memory benchmark metrics, test environment specifications, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
-
 ## Quickstart
 
 ### 1. Installation
@@ -148,6 +134,20 @@ rowlite list tasks.md --where "tags like beach"
 rowlite list tasks.md --where "Title regex ^[A-Z]"
 ```
 
+## ⚡ Performance
+
+Built in Go for speed, low memory overhead, and zero external dependencies. `rowlite` executes operations on tens of thousands of rows in milliseconds:
+
+| Dataset | Operation | End-to-End Time (Disk $\rightarrow$ Result) | In-Memory / Cached |
+| :--- | :--- | :--- | :--- |
+| **10,000 rows** (1.25 MB) | Exact Match Query (`--where`) | **~13.0 ms** | **~0.19 ms** |
+| **10,000 rows** (1.25 MB) | Row Append (Auto-Increment + Audit) | **~15.2 ms** | — |
+| **10,000 rows** (1.25 MB) | Fast-Path Count (zero filters) | **~14.3 ms** | — |
+| **10,000 rows** (1.25 MB) | Unicode Substring Search (`like`) | **~16.5 ms** | **~2.46 ms** |
+| **10,000 rows** (1.25 MB) | Full Table In-Place Sort | **~32.0 ms** | **~20.4 ms** |
+
+> For complete end-to-end and in-memory benchmark metrics, test environment specifications, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
+
 ## Roadmap
 Currently (2026-08-01) rowlite supports only bare minimum - append operation, simple query, count. Ideally markdown with table only.
 
@@ -156,6 +156,7 @@ Other features/improvements coming soon:
 - update row/cell (next release)
 - journalling changes (next release)
 - MCP table metadata caching (next release)
+- positional selection / filtering by row index (next release)
 - delete row (future release)
 - releases to MCP directories (future release)
 - insert (future release)

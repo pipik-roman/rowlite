@@ -187,6 +187,7 @@ func (j JSONRenderer) Render(out io.Writer, headers []string, rows [][]string) e
 		list = []map[string]string{}
 	}
 	encoder := json.NewEncoder(out)
+	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(list)
 }
@@ -247,13 +248,9 @@ func NewListCmd() *cobra.Command {
 				return fmt.Errorf("invalid format: %q (must be one of: auto, json, csv, tsv, md, markdown, pretty)", formatFlag)
 			}
 
-			var filters []core.Filter
-			for _, wf := range whereFlags {
-				flt, err := core.ParseFilter(wf)
-				if err != nil {
-					return err
-				}
-				filters = append(filters, flt)
+			filters, err := core.ParseFilters(whereFlags)
+			if err != nil {
+				return err
 			}
 
 			cfg, rows, err := core.ParseFrontmatterAndContent(cmd.Context(), filePath, core.ContentModeAll)
@@ -265,23 +262,11 @@ func NewListCmd() *cobra.Command {
 				return fmt.Errorf("no gfm table headers found in %s", filePath)
 			}
 
-			var matchedRows [][]string
-			for _, row := range rows {
-				match := true
-				for _, flt := range filters {
-					m, err := core.EvaluateFilter(headers, row, flt)
-					if err != nil {
-						return err
-					}
-					if !m {
-						match = false
-						break
-					}
-				}
-				if match {
-					matchedRows = append(matchedRows, row)
-				}
+			matched, err := core.SelectRows(headers, rows, filters)
+			if err != nil {
+				return err
 			}
+			matchedRows := matched.Rows()
 
 			var renderer TableRenderer
 			switch formatFlag {

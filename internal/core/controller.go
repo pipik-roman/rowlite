@@ -136,6 +136,33 @@ func (tc TableConfig) IsSortedBy(colName string, sortingDir string) bool {
 }
 
 
+// MatchedRow represents a single table row along with its 0-based index.
+type MatchedRow struct {
+	Index int      // 0-based row index in the original table rows slice
+	Row   []string // Row cell values
+}
+
+// MatchedRows represents a collection of matched rows.
+type MatchedRows []MatchedRow
+
+// Rows extracts and returns a 2D slice of strings for rendering and formatting.
+func (m MatchedRows) Rows() [][]string {
+	res := make([][]string, len(m))
+	for i, mr := range m {
+		res[i] = mr.Row
+	}
+	return res
+}
+
+// Indices extracts and returns the slice of original 0-based row indices.
+func (m MatchedRows) Indices() []int {
+	res := make([]int, len(m))
+	for i, mr := range m {
+		res[i] = mr.Index
+	}
+	return res
+}
+
 // Filter represents a single WHERE filter condition
 type Filter struct {
 	Column   string
@@ -171,6 +198,22 @@ func ParseFilter(expr string) (Filter, error) {
 	return Filter{Column: col, Operator: op, Value: val}, nil
 }
 
+// ParseFilters parses multiple WHERE conditions into a slice of Filter objects.
+func ParseFilters(whereClauses []string) ([]Filter, error) {
+	if len(whereClauses) == 0 {
+		return nil, nil
+	}
+	filters := make([]Filter, 0, len(whereClauses))
+	for _, expr := range whereClauses {
+		flt, err := ParseFilter(expr)
+		if err != nil {
+			return nil, err
+		}
+		filters = append(filters, flt)
+	}
+	return filters, nil
+}
+
 // EvaluateFilter checks if a row cell matches the filter
 func EvaluateFilter(headers []string, row []string, filter Filter) (bool, error) {
 	colIdx, _, err := ResolveColumn(headers, filter.Column)
@@ -198,6 +241,38 @@ func EvaluateFilter(headers []string, row []string, filter Filter) (bool, error)
 	default:
 		return false, fmt.Errorf("unknown operator %q", filter.Operator)
 	}
+}
+
+// MatchesRow evaluates whether a single row satisfies all provided filters (AND logic).
+func MatchesRow(headers []string, row []string, filters []Filter) (bool, error) {
+	for _, flt := range filters {
+		m, err := EvaluateFilter(headers, row, flt)
+		if err != nil {
+			return false, err
+		}
+		if !m {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// SelectRows scans rows and returns all rows that match the filters along with their 0-based table indices.
+func SelectRows(headers []string, rows [][]string, filters []Filter) (MatchedRows, error) {
+	var matches MatchedRows
+	for i, row := range rows {
+		matched, err := MatchesRow(headers, row, filters)
+		if err != nil {
+			return nil, err
+		}
+		if matched {
+			matches = append(matches, MatchedRow{
+				Index: i,
+				Row:   row,
+			})
+		}
+	}
+	return matches, nil
 }
 
 type ContentMode int
@@ -1169,13 +1244,9 @@ func SortTableAction(ctx context.Context, filePath string, byRule string, trigge
 
 // Count returns the number of matching rows in the table
 func Count(ctx context.Context, filePath string, where []string) (int, error) {
-	var filters []Filter
-	for _, wf := range where {
-		flt, err := ParseFilter(wf)
-		if err != nil {
-			return 0, err
-		}
-		filters = append(filters, flt)
+	filters, err := ParseFilters(where)
+	if err != nil {
+		return 0, err
 	}
 
 	// Optimize: if no filters, we don't need to load any rows into memory!
@@ -1193,25 +1264,11 @@ func Count(ctx context.Context, filePath string, where []string) (int, error) {
 		return cfg.RowCount, nil
 	}
 
-	// Count matching rows
-	count := 0
-	for _, row := range rows {
-		match := true
-		for _, flt := range filters {
-			m, err := EvaluateFilter(cfg.Headers, row, flt)
-			if err != nil {
-				return 0, err
-			}
-			if !m {
-				match = false
-				break
-			}
-		}
-		if match {
-			count++
-		}
+	matches, err := SelectRows(cfg.Headers, rows, filters)
+	if err != nil {
+		return 0, err
 	}
-	return count, nil
+	return len(matches), nil
 }
 
 // Normalize transforms a string into a canonical lowercase form stripping separators.

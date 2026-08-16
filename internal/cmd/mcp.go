@@ -176,13 +176,9 @@ func NewMcpCmd() *cobra.Command {
 				Name:        "rowlite_list",
 				Description: "List matching rows from the markdown GFM table using optional WHERE filters (supports ==, !=, like, regex)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args ListContentArgs) (*mcp.CallToolResult, any, error) {
-				var filters []core.Filter
-				for _, wf := range args.Where {
-					flt, err := core.ParseFilter(wf)
-					if err != nil {
-						return nil, nil, err
-					}
-					filters = append(filters, flt)
+				filters, err := core.ParseFilters(args.Where)
+				if err != nil {
+					return nil, nil, err
 				}
 
 				cfgParsed, rows, err := cache.GetOrParse(ctx, args.File, core.ContentModeAll)
@@ -190,6 +186,11 @@ func NewMcpCmd() *cobra.Command {
 					return nil, nil, err
 				}
 				headers := cfgParsed.Headers
+
+				matched, err := core.SelectRows(headers, rows, filters)
+				if err != nil {
+					return nil, nil, err
+				}
 
 				var sb strings.Builder
 				sb.WriteString(core.FormatGFMLine(headers))
@@ -201,22 +202,9 @@ func NewMcpCmd() *cobra.Command {
 				sb.WriteString(core.FormatGFMLine(seps))
 				sb.WriteByte('\n')
 
-				for _, row := range rows {
-					match := true
-					for _, flt := range filters {
-						m, err := core.EvaluateFilter(headers, row, flt)
-						if err != nil {
-							return nil, nil, err
-						}
-						if !m {
-							match = false
-							break
-						}
-					}
-					if match {
-						sb.WriteString(core.FormatGFMLine(row))
-						sb.WriteByte('\n')
-					}
+				for _, mr := range matched {
+					sb.WriteString(core.FormatGFMLine(mr.Row))
+					sb.WriteByte('\n')
 				}
 
 				return &mcp.CallToolResult{

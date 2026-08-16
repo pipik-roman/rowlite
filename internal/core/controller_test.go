@@ -103,6 +103,120 @@ func TestEvaluateFilter(t *testing.T) {
 	}
 }
 
+func TestParseFilters(t *testing.T) {
+	t.Run("empty filters", func(t *testing.T) {
+		filters, err := core.ParseFilters(nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(filters) != 0 {
+			t.Errorf("expected 0 filters, got %d", len(filters))
+		}
+	})
+
+	t.Run("valid multi filters", func(t *testing.T) {
+		where := []string{"status == active", "priority != low", "tag like dev"}
+		filters, err := core.ParseFilters(where)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(filters) != 3 {
+			t.Fatalf("expected 3 filters, got %d", len(filters))
+		}
+		if filters[0].Column != "status" || filters[0].Operator != "==" || filters[0].Value != "active" {
+			t.Errorf("unexpected filter 0: %+v", filters[0])
+		}
+		if filters[1].Column != "priority" || filters[1].Operator != "!=" || filters[1].Value != "low" {
+			t.Errorf("unexpected filter 1: %+v", filters[1])
+		}
+		if filters[2].Column != "tag" || filters[2].Operator != "like" || filters[2].Value != "dev" {
+			t.Errorf("unexpected filter 2: %+v", filters[2])
+		}
+	})
+
+	t.Run("invalid filter error", func(t *testing.T) {
+		_, err := core.ParseFilters([]string{"status == active", "invalid_clause"})
+		if err == nil {
+			t.Fatal("expected error on invalid clause, got nil")
+		}
+	})
+}
+
+func TestMatchesRow(t *testing.T) {
+	headers := []string{"id", "name", "status"}
+	row := []string{"10", "Deploy App", "active"}
+
+	filters, err := core.ParseFilters([]string{"id == 10", "status == active"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	match, err := core.MatchesRow(headers, row, filters)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !match {
+		t.Error("expected row to match all filters")
+	}
+
+	nonMatchingFilters, _ := core.ParseFilters([]string{"id == 10", "status == done"})
+	match, err = core.MatchesRow(headers, row, nonMatchingFilters)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if match {
+		t.Error("expected row not to match filters")
+	}
+}
+
+func TestSelectRowsAndHelpers(t *testing.T) {
+	headers := []string{"id", "title", "category"}
+	rows := [][]string{
+		{"1", "Task A", "work"},
+		{"2", "Task B", "personal"},
+		{"3", "Task C", "work"},
+		{"4", "Task D", "work"},
+	}
+
+	// 1. Select with no filters -> returns all rows preserving indices
+	allMatches, err := core.SelectRows(headers, rows, nil)
+	if err != nil {
+		t.Fatalf("SelectRows error: %v", err)
+	}
+	if len(allMatches) != 4 {
+		t.Fatalf("expected 4 matches, got %d", len(allMatches))
+	}
+	expectedIndices := []int{0, 1, 2, 3}
+	if !reflect.DeepEqual(allMatches.Indices(), expectedIndices) {
+		t.Errorf("Indices() = %v, want %v", allMatches.Indices(), expectedIndices)
+	}
+	if !reflect.DeepEqual(allMatches.Rows(), rows) {
+		t.Errorf("Rows() = %v, want %v", allMatches.Rows(), rows)
+	}
+
+	// 2. Select with category == work
+	filters, _ := core.ParseFilters([]string{"category == work"})
+	workMatches, err := core.SelectRows(headers, rows, filters)
+	if err != nil {
+		t.Fatalf("SelectRows error: %v", err)
+	}
+	if len(workMatches) != 3 {
+		t.Fatalf("expected 3 work matches, got %d", len(workMatches))
+	}
+	expectedWorkIndices := []int{0, 2, 3}
+	if !reflect.DeepEqual(workMatches.Indices(), expectedWorkIndices) {
+		t.Errorf("work Indices() = %v, want %v", workMatches.Indices(), expectedWorkIndices)
+	}
+	expectedWorkRows := [][]string{
+		{"1", "Task A", "work"},
+		{"3", "Task C", "work"},
+		{"4", "Task D", "work"},
+	}
+	if !reflect.DeepEqual(workMatches.Rows(), expectedWorkRows) {
+		t.Errorf("work Rows() = %v, want %v", workMatches.Rows(), expectedWorkRows)
+	}
+}
+
 func TestSortRows(t *testing.T) {
 	headers := []string{"id", "value"}
 	rows := [][]string{

@@ -1,6 +1,7 @@
 module github.com/pipik-roman/rowlite
 
-go 1.26.5
+go 1.26.6
+
 
 require (
 	github.com/adrg/frontmatter v0.2.0

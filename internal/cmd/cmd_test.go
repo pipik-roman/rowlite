@@ -489,3 +489,49 @@ rowlite:
 		t.Errorf("unexpected cached AutoIncrement config: %+v", cfg2.AutoIncrement)
 	}
 }
+
+func TestListCmd_LargeTable10k_SpecialCharacters(t *testing.T) {
+	dbPath := filepath.Join("testdata", "large_table_10k.md")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Fatalf("10k table fixture not found at %s", dbPath)
+	}
+
+	// 1. Test CLI list with JSON format and special character query (🚀)
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var jsonBuf bytes.Buffer
+	listCmd.SetOut(&jsonBuf)
+	listCmd.SetArgs([]string{dbPath, "--where", "Task Description like 🚀", "--format", "json"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list cmd failed: %v", err)
+	}
+	jsonOut := jsonBuf.String()
+	if !strings.Contains(jsonOut, "Deploy service to Kubernetes cluster 🚀") || !strings.Contains(jsonOut, `"Category Name": "DevOps & CI/CD"`) {
+		t.Errorf("expected JSON output with emoji and special chars, got: %s", jsonOut)
+	}
+
+	// 2. Test CLI list with escaped pipe query
+	listCmd = silenceCmd(cmd.NewListCmd())
+	var csvBuf bytes.Buffer
+	listCmd.SetOut(&csvBuf)
+	listCmd.SetArgs([]string{dbPath, "--where", "Task Description like Option A | Option B", "--format", "csv"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list cmd with pipe search failed: %v", err)
+	}
+	csvOut := csvBuf.String()
+	if !strings.Contains(csvOut, "Option A | Option B") {
+		t.Errorf("expected CSV output with pipe search, got: %s", csvOut)
+	}
+
+	// 3. Test CLI count fast path
+	countCmd := silenceCmd(cmd.NewCountCmd())
+	var countBuf bytes.Buffer
+	countCmd.SetOut(&countBuf)
+	countCmd.SetArgs([]string{dbPath})
+	if err := countCmd.Execute(); err != nil {
+		t.Fatalf("count cmd failed: %v", err)
+	}
+	if strings.TrimSpace(countBuf.String()) != "10000" {
+		t.Errorf("expected count 10000, got: %s", countBuf.String())
+	}
+}
+

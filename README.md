@@ -107,31 +107,53 @@ rowlite mcp-setup --client copilot
 - `rowlite help` - See CLI help for details
 - `rowlite init <file> [--columns "id,name"] [--unique "id"] [--sort "id:asc"] [--autoincrement "id:10"] [--journal-log "journal.log"]` - Create new markdown table file or update frontmatter constraints in-place. 
 - `rowlite structure <file>` - Display column names, constraints, and audit log mappings.
-- `rowlite list <file> --where "<column> <op> <value>"` - Query and filter rows.
-- `rowlite count <file> --where "<column> <op> <value>"` - Count queried or filtered rows.
+- `rowlite list <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--format json|csv|tsv|md|pretty] [--include-row-number]` - Query, filter, and slice rows.
+- `rowlite count <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L]` - Count queried, filtered, or sliced rows.
 - `rowlite append <file> --row '{"col1": "val1"}'` - Append a row, applying validations. Use JSON or CSV.
 - `rowlite dedupe <file> --column <name>` - Purge duplicate records in place.
-- `rowlite sort <file> --by "column:order,..."` - Sort the table. Usefull for one-time sort or trigger the sorting from now-on.
+- `rowlite sort <file> --by "column:order,..."` - Sort the table. Useful for one-time sort or trigger the sorting from now-on.
 
-### Query Filtering (`--where`)
-Both the `list` and `count` commands support filtering rows using the `--where` flag. Column names in `--where` clauses are resolved using a **Case-Insensitive & Normalized Lookup** (e.g. `ITEM name`, `item_name` or `item-name` match `item name` header automatically).
+### Querying & Slicing Tables
+Both `rowlite list` and `rowlite count` share a unified, two-stage query evaluation pipeline:
 
-#### Supported Operators
-- `==` : Exact match.
-- `!=` : Inequality match.
-- `like` : Case-insensitive substring match.
-- `regex` : Go regular expression match.
+$$\text{Table Content} \xrightarrow{\text{1. Content Filtering (--where)}} \text{Matched Records} \xrightarrow{\text{2. Positional Slicing (--head, --tail, --index, pagination)}} \text{Target Rows}$$
 
-#### Examples
+When combined, positional parameters (`--head`, `--tail`, `--index`, `--offset`, `--limit`) slice directly across the records that match your `--where` filters.
+
+#### 1. Content Filtering (`--where`)
+Filter rows based on column values. Column names are resolved using a **Case-Insensitive & Normalized Lookup** (e.g. `ITEM name`, `item_name`, or `item-name` automatically match the `Item Name` header).
+
+* **Supported Operators**:
+  * `==` : Exact string equality.
+  * `!=` : Inequality.
+  * `like` : Case-insensitive substring match.
+  * `regex` : Go regular expression match.
+
+#### 2. Positional Selection & Slicing
+Target rows by their logical positions or apply pagination:
+
+* `--head <N>`, `-H <N>` : Extract first $N$ rows (from start of matching set).
+* `--tail <N>`, `-T <N>` : Extract last $N$ rows (from end of matching set).
+* `--index <spec>`, `-i <spec>` : Target specific row index, list (`"0,2,4"`), range (`"2..10"` / `"2:10"`), or stepped slice (`"0..20..2"` / `"0:20:2"`). Supports negative indices (e.g. `"-1"` targets the last row).
+* `--offset <O>` & `--limit <L>` : Zero-based sliding pagination window.
+* `--include-row-number` : Inject `#` / `__row_index__` into output for stable row references.
+
+#### Combined Query Examples
 ```powershell
-# Filter by exact priority
-rowlite list tasks.md --where "Priority == High"
+# 1. Content filter combined with positional limits: get top 5 critical tasks
+rowlite list tasks.md --where "Priority == High" --head 5
 
-# Case-insensitive search in column (resolves tags column normalized and case-insensitively)
-rowlite list tasks.md --where "tags like beach"
+# 2. Substring filter with pagination: get second page of active items (10 per page)
+rowlite list tasks.md --where "status like active" --offset 10 --limit 10
 
-# Go regular expression matching
-rowlite list tasks.md --where "Title regex ^[A-Z]"
+# 3. Exact filter with row numbering: inspect last 3 completed tasks
+rowlite list tasks.md --where "status == done" --tail 3 --include-row-number
+
+# 4. Count matching rows within a positional slice
+rowlite count tasks.md --where "status == active" --head 10
+
+# 5. Stepped slice across whole table (even-numbered rows)
+rowlite list tasks.md --index "0..50..2"
 ```
 
 ## ⚡ Performance
@@ -141,6 +163,7 @@ Built in Go for speed, low memory overhead, and zero external dependencies. `row
 | Dataset | Operation | End-to-End Time (Disk $\rightarrow$ Result) | In-Memory / Cached |
 | :--- | :--- | :--- | :--- |
 | **10,000 rows** (1.25 MB) | Exact Match Query (`--where`) | **~13.0 ms** | **~0.19 ms** |
+| **10,000 rows** (1.25 MB) | Positional Slicing (`--index`) | **~17.7 ms** | **~3.65 µs** |
 | **10,000 rows** (1.25 MB) | Row Append (Auto-Increment + Audit) | **~15.2 ms** | — |
 | **10,000 rows** (1.25 MB) | Fast-Path Count (zero filters) | **~14.3 ms** | — |
 | **10,000 rows** (1.25 MB) | Unicode Substring Search (`like`) | **~16.5 ms** | **~2.46 ms** |

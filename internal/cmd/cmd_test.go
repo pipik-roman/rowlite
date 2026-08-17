@@ -535,3 +535,295 @@ func TestListCmd_LargeTable10k_SpecialCharacters(t *testing.T) {
 	}
 }
 
+func TestListAndCountPositionalOptions(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "items.md")
+
+	// 1. Initialize
+	initCmd := silenceCmd(cmd.NewInitCmd())
+	initCmd.SetArgs([]string{dbPath, "--columns", "id,name,status"})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// 2. Append 6 rows
+	rows := []string{
+		`{"id":"1", "name":"Alpha", "status":"active"}`,
+		`{"id":"2", "name":"Beta", "status":"pending"}`,
+		`{"id":"3", "name":"Gamma", "status":"active"}`,
+		`{"id":"4", "name":"Delta", "status":"active"}`,
+		`{"id":"5", "name":"Epsilon", "status":"inactive"}`,
+		`{"id":"6", "name":"Zeta", "status":"active"}`,
+	}
+	for i, r := range rows {
+		appCmd := silenceCmd(cmd.NewAppendCmd())
+		appCmd.SetArgs([]string{dbPath, r})
+		if err := appCmd.Execute(); err != nil {
+			t.Fatalf("append %d failed: %v", i, err)
+		}
+	}
+
+	// 3. Test Head 2
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var buf bytes.Buffer
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--head", "2"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("head list failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Alpha") || !strings.Contains(out, "Beta") || strings.Contains(out, "Gamma") {
+		t.Errorf("unexpected head 2 output: %s", out)
+	}
+
+	// 4. Test Tail 2
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--tail", "2"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("tail list failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "Epsilon") || !strings.Contains(out, "Zeta") || strings.Contains(out, "Delta") {
+		t.Errorf("unexpected tail 2 output: %s", out)
+	}
+
+	// 5. Test Head 2 and Tail 2 partition
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--head", "2", "--tail", "2"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("head/tail partition list failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "Alpha") || !strings.Contains(out, "Beta") || !strings.Contains(out, "Epsilon") || !strings.Contains(out, "Zeta") || strings.Contains(out, "Gamma") {
+		t.Errorf("unexpected head/tail partition output: %s", out)
+	}
+
+	// 6. Test Index list "1, 3, 5"
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--index", "1, 3, 5"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("index list failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "Beta") || !strings.Contains(out, "Delta") || !strings.Contains(out, "Zeta") || strings.Contains(out, "Alpha") {
+		t.Errorf("unexpected index list output: %s", out)
+	}
+
+	// 7. Test Stepped Slice "0..5..2"
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--index", "0..5..2"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("stepped slice list failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "Alpha") || !strings.Contains(out, "Gamma") || !strings.Contains(out, "Epsilon") || strings.Contains(out, "Beta") {
+		t.Errorf("unexpected stepped slice output: %s", out)
+	}
+
+	// 8. Test Negative range "-2..-1"
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--index", "-2..-1"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("negative range list failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "Epsilon") || !strings.Contains(out, "Zeta") || strings.Contains(out, "Alpha") {
+		t.Errorf("unexpected negative range output: %s", out)
+	}
+
+	// 9. Test Offset and Limit pagination
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--offset", "2", "--limit", "2"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("offset/limit list failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "Gamma") || !strings.Contains(out, "Delta") || strings.Contains(out, "Alpha") || strings.Contains(out, "Epsilon") {
+		t.Errorf("unexpected offset/limit output: %s", out)
+	}
+
+	// 10. Test Where combined with Head
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--where", "status==active", "--head", "2"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("where + head list failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "Alpha") || !strings.Contains(out, "Gamma") || strings.Contains(out, "Delta") || strings.Contains(out, "Zeta") {
+		t.Errorf("unexpected where + head output: %s", out)
+	}
+
+	// 11. Test --include-row-number with JSON
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--head", "2", "--format", "json", "--include-row-number"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("json with row number failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, `"__row_index__": 0`) || !strings.Contains(out, `"__row_index__": 1`) {
+		t.Errorf("expected __row_index__ in JSON output: %s", out)
+	}
+
+	// 12. Test --include-row-number with Pretty
+	listCmd = silenceCmd(cmd.NewListCmd())
+	buf.Reset()
+	listCmd.SetOut(&buf)
+	listCmd.SetArgs([]string{dbPath, "--head", "1", "--format", "pretty", "--include-row-number"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("pretty with row number failed: %v", err)
+	}
+	out = buf.String()
+	if !strings.Contains(out, "│ # ") || !strings.Contains(out, "│ 0 ") {
+		t.Errorf("expected # column in pretty table: %s", out)
+	}
+
+	// 13. Test Count with positional flags
+	countCmd := silenceCmd(cmd.NewCountCmd())
+	var countBuf bytes.Buffer
+	countCmd.SetOut(&countBuf)
+	countCmd.SetArgs([]string{dbPath, "--head", "3"})
+	if err := countCmd.Execute(); err != nil {
+		t.Fatalf("count head failed: %v", err)
+	}
+	if strings.TrimSpace(countBuf.String()) != "3" {
+		t.Errorf("expected count 3, got: %s", countBuf.String())
+	}
+
+	// 14. Test Count with Where + Head
+	countCmd = silenceCmd(cmd.NewCountCmd())
+	countBuf.Reset()
+	countCmd.SetOut(&countBuf)
+	countCmd.SetArgs([]string{dbPath, "--where", "status==active", "--head", "2"})
+	if err := countCmd.Execute(); err != nil {
+		t.Fatalf("count where+head failed: %v", err)
+	}
+	if strings.TrimSpace(countBuf.String()) != "2" {
+		t.Errorf("expected count 2, got: %s", countBuf.String())
+	}
+
+	// 15. Test Count with Stepped Slice
+	countCmd = silenceCmd(cmd.NewCountCmd())
+	countBuf.Reset()
+	countCmd.SetOut(&countBuf)
+	countCmd.SetArgs([]string{dbPath, "--index", "0..5..2"})
+	if err := countCmd.Execute(); err != nil {
+		t.Fatalf("count index slice failed: %v", err)
+	}
+	if strings.TrimSpace(countBuf.String()) != "3" {
+		t.Errorf("expected count 3, got: %s", countBuf.String())
+	}
+}
+
+func TestFilterFirst_ExecutionOrder_DistinctFromPositionFirst(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "filter_first.md")
+
+	// 1. Initialize table
+	initCmd := silenceCmd(cmd.NewInitCmd())
+	initCmd.SetArgs([]string{dbPath, "--columns", "id,title,status"})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// 2. Insert records where first 2 rows are "Complete", and subsequent rows are "Pending"
+	// Physical Row 0: Complete
+	// Physical Row 1: Complete
+	// Physical Row 2: Pending (First Pending row)
+	// Physical Row 3: Pending (Second Pending row)
+	// Physical Row 4: Complete
+	// Physical Row 5: Pending (Third Pending row)
+	testRows := []string{
+		`{"id":"1", "title":"Task 1", "status":"Complete"}`,
+		`{"id":"2", "title":"Task 2", "status":"Complete"}`,
+		`{"id":"3", "title":"Task 3", "status":"Pending"}`,
+		`{"id":"4", "title":"Task 4", "status":"Pending"}`,
+		`{"id":"5", "title":"Task 5", "status":"Complete"}`,
+		`{"id":"6", "title":"Task 6", "status":"Pending"}`,
+	}
+	for i, r := range testRows {
+		appCmd := silenceCmd(cmd.NewAppendCmd())
+		appCmd.SetArgs([]string{dbPath, r})
+		if err := appCmd.Execute(); err != nil {
+			t.Fatalf("append %d failed: %v", i, err)
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Case 1: --where "status == Pending" --head 2
+	// If Position-First: takes physical rows 0 & 1 ("Complete"), filters for "Pending" -> 0 rows returned!
+	// If Filter-First: filters to rows [2, 3, 5], takes first 2 -> Task 3 & Task 4 returned.
+	// -------------------------------------------------------------------------
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var listBuf bytes.Buffer
+	listCmd.SetOut(&listBuf)
+	listCmd.SetArgs([]string{dbPath, "--where", "status==Pending", "--head", "2", "--include-row-number"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	out := listBuf.String()
+
+	// Must contain Task 3 and Task 4
+	if !strings.Contains(out, "Task 3") || !strings.Contains(out, "Task 4") {
+		t.Fatalf("Filter-First violation! Expected Task 3 and Task 4, got output:\n%s", out)
+	}
+	// Must NOT contain Task 1, Task 2, or Task 5
+	if strings.Contains(out, "Task 1") || strings.Contains(out, "Task 2") || strings.Contains(out, "Task 5") {
+		t.Errorf("Unexpected Complete tasks present in filtered output:\n%s", out)
+	}
+	// Verify row indices reflect original table positions 2 and 3
+	if !strings.Contains(out, "| 2 |") || !strings.Contains(out, "| 3 |") {
+		t.Errorf("Expected original row indices 2 and 3 in output:\n%s", out)
+	}
+
+	// -------------------------------------------------------------------------
+	// Case 2: --where "status == Pending" --index 0
+	// If Position-First: physical row 0 is "Complete", so filtering returns 0 rows.
+	// If Filter-First: index 0 of Pending set targets physical row 2 ("Task 3").
+	// -------------------------------------------------------------------------
+	listCmd = silenceCmd(cmd.NewListCmd())
+	listBuf.Reset()
+	listCmd.SetOut(&listBuf)
+	listCmd.SetArgs([]string{dbPath, "--where", "status==Pending", "--index", "0"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list index 0 failed: %v", err)
+	}
+	out = listBuf.String()
+	if !strings.Contains(out, "Task 3") || strings.Contains(out, "Task 1") || strings.Contains(out, "Task 4") {
+		t.Fatalf("Filter-First index 0 failed! Expected only Task 3, got:\n%s", out)
+	}
+
+	// -------------------------------------------------------------------------
+	// Case 3: Count with --where "status == Pending" --head 2
+	// If Position-First: count would be 0.
+	// If Filter-First: count must be 2.
+	// -------------------------------------------------------------------------
+	countCmd := silenceCmd(cmd.NewCountCmd())
+	var countBuf bytes.Buffer
+	countCmd.SetOut(&countBuf)
+	countCmd.SetArgs([]string{dbPath, "--where", "status==Pending", "--head", "2"})
+	if err := countCmd.Execute(); err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if countStr := strings.TrimSpace(countBuf.String()); countStr != "2" {
+		t.Fatalf("Filter-First count failed! Expected 2, got %s (would be 0 under incorrect position-first order)", countStr)
+	}
+}
+
+
+

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -64,6 +65,36 @@ func (c *TableConfigCache) GetOrParse(ctx context.Context, filePath string, mode
 	c.mu.Unlock()
 
 	return cfg, rows, nil
+}
+
+func parseIndexArg(raw any) string {
+	if raw == nil {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.Itoa(int(v))
+	case int:
+		return strconv.Itoa(v)
+	case []any:
+		var parts []string
+		for _, item := range v {
+			parts = append(parts, fmt.Sprint(item))
+		}
+		return strings.Join(parts, ",")
+	case []int:
+		var parts []string
+		for _, item := range v {
+			parts = append(parts, strconv.Itoa(item))
+		}
+		return strings.Join(parts, ",")
+	case []string:
+		return strings.Join(v, ",")
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func NewMcpCmd() *cobra.Command {
@@ -169,16 +200,30 @@ func NewMcpCmd() *cobra.Command {
 			})
 
 			type ListContentArgs struct {
-				File  string   `json:"file" jsonschema:"path to the markdown file"`
-				Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
+				File            string   `json:"file" jsonschema:"path to the markdown file"`
+				Where           []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
+				Head            *int     `json:"head,omitempty" jsonschema:"extract the first N logical data rows from table start"`
+				Tail            *int     `json:"tail,omitempty" jsonschema:"extract the last N logical data rows from table end"`
+				Index           any      `json:"index,omitempty" jsonschema:"target row index (e.g. 0, -1), list ([0,2,4]), range ('2..10', '2:10'), or stepped slice ('0..20..2')"`
+				Offset          int      `json:"offset,omitempty" jsonschema:"zero-based row offset for pagination"`
+				Limit           *int     `json:"limit,omitempty" jsonschema:"maximum number of rows to return"`
+				IncludeMetadata bool     `json:"include_metadata,omitempty" jsonschema:"when true, returns structured JSON metadata envelope with __row_index__, indices, total rows, and schema"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_list",
-				Description: "List matching rows from the markdown GFM table using optional WHERE filters (supports ==, !=, like, regex)",
+				Description: "List matching rows from the markdown GFM table using optional WHERE filters and positional selectors (head, tail, index, offset, limit)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args ListContentArgs) (*mcp.CallToolResult, any, error) {
 				filters, err := core.ParseFilters(args.Where)
 				if err != nil {
 					return nil, nil, err
+				}
+
+				posOpts := core.PositionalOptions{
+					Head:   args.Head,
+					Tail:   args.Tail,
+					Index:  parseIndexArg(args.Index),
+					Offset: args.Offset,
+					Limit:  args.Limit,
 				}
 
 				cfgParsed, rows, err := cache.GetOrParse(ctx, args.File, core.ContentModeAll)
@@ -192,12 +237,59 @@ func NewMcpCmd() *cobra.Command {
 					return nil, nil, err
 				}
 
+				if !posOpts.IsZero() {
+					matched, err = matched.ApplyPositional(posOpts)
+					if err != nil {
+						return nil, nil, err
+					}
+				}
+
+				if args.IncludeMetadata {
+					dataSlice := make([]map[string]any, len(matched))
+					for i, mr := range matched {
+						obj := make(map[string]any)
+						obj["__row_index__"] = mr.Index
+						for colIdx, h := range headers {
+							val := ""
+							if colIdx < len(mr.Row) {
+								val = mr.Row[colIdx]
+							}
+							obj[h] = val
+						}
+						dataSlice[i] = obj
+					}
+
+					metaResponse := map[string]any{
+						"status": "success",
+						"meta": map[string]any{
+							"total_rows":        cfgParsed.RowCount,
+							"returned_rows":     len(matched),
+							"offset":            posOpts.Offset,
+							"indices_retrieved": matched.Indices(),
+						},
+						"schema": map[string]any{
+							"columns": headers,
+						},
+						"data": dataSlice,
+					}
+					jsonBytes, _ := json.MarshalIndent(metaResponse, "", "  ")
+					return &mcp.CallToolResult{
+						Content: []mcp.Content{
+							&mcp.TextContent{Text: string(jsonBytes)},
+						},
+					}, nil, nil
+				}
+
 				var sb strings.Builder
 				sb.WriteString(core.FormatGFMLine(headers))
 				sb.WriteByte('\n')
 				seps := make([]string, len(headers))
 				for i := range seps {
-					seps[i] = "---"
+					if i < len(cfgParsed.Alignments) && strings.TrimSpace(cfgParsed.Alignments[i]) != "" {
+						seps[i] = cfgParsed.Alignments[i]
+					} else {
+						seps[i] = "---"
+					}
 				}
 				sb.WriteString(core.FormatGFMLine(seps))
 				sb.WriteByte('\n')
@@ -215,14 +307,27 @@ func NewMcpCmd() *cobra.Command {
 			})
 
 			type CountContentArgs struct {
-				File  string   `json:"file" jsonschema:"path to the markdown file"`
-				Where []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
+				File   string   `json:"file" jsonschema:"path to the markdown file"`
+				Where  []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
+				Head   *int     `json:"head,omitempty" jsonschema:"count bounded to first N rows"`
+				Tail   *int     `json:"tail,omitempty" jsonschema:"count bounded to last N rows"`
+				Index  any      `json:"index,omitempty" jsonschema:"target row index, list, range, or stepped slice"`
+				Offset int      `json:"offset,omitempty" jsonschema:"zero-based row offset for pagination"`
+				Limit  *int     `json:"limit,omitempty" jsonschema:"maximum count limit"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_count",
-				Description: "Count matching rows from the markdown GFM table using optional WHERE filters (supports ==, !=, like, regex)",
+				Description: "Count matching rows from the markdown GFM table using optional WHERE filters and positional selectors",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args CountContentArgs) (*mcp.CallToolResult, any, error) {
-				count, err := core.Count(ctx, args.File, args.Where)
+				posOpts := core.PositionalOptions{
+					Head:   args.Head,
+					Tail:   args.Tail,
+					Index:  parseIndexArg(args.Index),
+					Offset: args.Offset,
+					Limit:  args.Limit,
+				}
+
+				count, err := core.CountWithOptions(ctx, args.File, args.Where, posOpts)
 				if err != nil {
 					return nil, nil, err
 				}

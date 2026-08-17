@@ -359,3 +359,51 @@ func TestLargeTable10k_Append(t *testing.T) {
 	}
 }
 
+func TestLargeTable10k_PositionalQueries(t *testing.T) {
+	filePath := get10kTablePath(t)
+	ctx := context.Background()
+
+	// 1. Count with Head 50
+	headCount := 50
+	count, err := core.CountWithOptions(ctx, filePath, nil, core.PositionalOptions{Head: &headCount})
+	if err != nil {
+		t.Fatalf("CountWithOptions head error: %v", err)
+	}
+	if count != 50 {
+		t.Errorf("expected count 50, got %d", count)
+	}
+
+	// 2. Count with Tail 25
+	tailCount := 25
+	count, err = core.CountWithOptions(ctx, filePath, nil, core.PositionalOptions{Tail: &tailCount})
+	if err != nil {
+		t.Fatalf("CountWithOptions tail error: %v", err)
+	}
+	if count != 25 {
+		t.Errorf("expected count 25, got %d", count)
+	}
+
+	// 3. Positional query with stepped slice on 10k rows: "0..9999..1000" (10 rows)
+	cfg, rows, err := core.ParseFrontmatterAndContent(ctx, filePath, core.ContentModeAll)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	matched, err := core.SelectRows(cfg.Headers, rows, nil)
+	if err != nil {
+		t.Fatalf("SelectRows error: %v", err)
+	}
+
+	sliced, err := matched.ApplyPositional(core.PositionalOptions{Index: "0..9999..1000"})
+	if err != nil {
+		t.Fatalf("ApplyPositional error: %v", err)
+	}
+	if len(sliced) != 10 {
+		t.Fatalf("expected 10 stepped rows, got %d", len(sliced))
+	}
+	if sliced[0].Index != 0 || sliced[9].Index != 9000 {
+		t.Errorf("expected indices 0 and 9000 at ends, got %d and %d", sliced[0].Index, sliced[9].Index)
+	}
+}
+
+

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -168,23 +169,29 @@ func (p PrettyRenderer) Render(out io.Writer, headers []string, rows [][]string)
 }
 
 // JSONRenderer formats and writes the table as a JSON array of objects.
-type JSONRenderer struct{}
+type JSONRenderer struct {
+	IncludeRowIndex bool
+	Matched         core.MatchedRows
+}
 
 func (j JSONRenderer) Render(out io.Writer, headers []string, rows [][]string) error {
-	var list []map[string]string
-	for _, row := range rows {
-		obj := make(map[string]string)
-		for i, h := range headers {
+	var list []map[string]any
+	for i, row := range rows {
+		obj := make(map[string]any)
+		if j.IncludeRowIndex && i < len(j.Matched) {
+			obj["__row_index__"] = j.Matched[i].Index
+		}
+		for colIdx, h := range headers {
 			val := ""
-			if i < len(row) {
-				val = row[i]
+			if colIdx < len(row) {
+				val = row[colIdx]
 			}
 			obj[h] = val
 		}
 		list = append(list, obj)
 	}
 	if list == nil {
-		list = []map[string]string{}
+		list = []map[string]any{}
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetEscapeHTML(false)
@@ -232,6 +239,12 @@ func NewListCmd() *cobra.Command {
 	const whereFlagName = "where"
 	var whereFlags []string
 	var formatFlag string
+	var headFlag int
+	var tailFlag int
+	var indexFlag string
+	var offsetFlag int
+	var limitFlag int
+	var includeRowNumberFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "list <file>",
@@ -247,6 +260,24 @@ func NewListCmd() *cobra.Command {
 			default:
 				return fmt.Errorf("invalid format: %q (must be one of: auto, json, csv, tsv, md, markdown, pretty)", formatFlag)
 			}
+
+			var posOpts core.PositionalOptions
+			if cmd.Flags().Changed("head") {
+				posOpts.Head = &headFlag
+			}
+			if cmd.Flags().Changed("tail") {
+				posOpts.Tail = &tailFlag
+			}
+			if cmd.Flags().Changed("index") {
+				posOpts.Index = indexFlag
+			}
+			if cmd.Flags().Changed("offset") {
+				posOpts.Offset = offsetFlag
+			}
+			if cmd.Flags().Changed("limit") {
+				posOpts.Limit = &limitFlag
+			}
+			posOpts.IncludeRowNumber = includeRowNumberFlag
 
 			filters, err := core.ParseFilters(whereFlags)
 			if err != nil {
@@ -266,34 +297,67 @@ func NewListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			matchedRows := matched.Rows()
+
+			if !posOpts.IsZero() {
+				matched, err = matched.ApplyPositional(posOpts)
+				if err != nil {
+					return err
+				}
+			}
+
+			if formatFlag == "json" {
+				renderer := JSONRenderer{
+					IncludeRowIndex: includeRowNumberFlag,
+					Matched:         matched,
+				}
+				return renderer.Render(cmd.OutOrStdout(), headers, matched.Rows())
+			}
+
+			renderHeaders := headers
+			renderAlignments := cfg.Alignments
+			renderRows := matched.Rows()
+
+			if includeRowNumberFlag {
+				renderHeaders = append([]string{"#"}, headers...)
+				if len(renderAlignments) > 0 {
+					renderAlignments = append([]string{":---"}, renderAlignments...)
+				}
+				renderRows = make([][]string, len(matched))
+				for i, mr := range matched {
+					renderRows[i] = append([]string{strconv.Itoa(mr.Index)}, mr.Row...)
+				}
+			}
 
 			var renderer TableRenderer
 			switch formatFlag {
-			case "json":
-				renderer = JSONRenderer{}
 			case "csv":
 				renderer = CSVRenderer{Comma: ','}
 			case "tsv":
 				renderer = CSVRenderer{Comma: '\t'}
 			case "md", "markdown":
-				renderer = GFMRenderer{Alignments: cfg.Alignments}
+				renderer = GFMRenderer{Alignments: renderAlignments}
 			case "pretty":
-				renderer = PrettyRenderer{Alignments: cfg.Alignments}
+				renderer = PrettyRenderer{Alignments: renderAlignments}
 			case "auto":
 				if isTerminal(cmd.OutOrStdout()) {
-					renderer = PrettyRenderer{Alignments: cfg.Alignments}
+					renderer = PrettyRenderer{Alignments: renderAlignments}
 				} else {
-					renderer = GFMRenderer{Alignments: cfg.Alignments}
+					renderer = GFMRenderer{Alignments: renderAlignments}
 				}
 			}
 
-			return renderer.Render(cmd.OutOrStdout(), headers, matchedRows)
+			return renderer.Render(cmd.OutOrStdout(), renderHeaders, renderRows)
 		},
 	}
 
 	cmd.Flags().StringSliceVar(&whereFlags, whereFlagName, nil, "WHERE conditions (supported operators: ==, !=, like, regex)")
 	cmd.Flags().StringVarP(&formatFlag, "format", "o", "auto", "Output format (auto, json, csv, tsv, md, pretty)")
+	cmd.Flags().IntVarP(&headFlag, "head", "H", 0, "Extract first N logical data rows from table start")
+	cmd.Flags().IntVarP(&tailFlag, "tail", "T", 0, "Extract last N logical data rows from table end")
+	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target logical row index, list (0,2,4), range (2..10, 2:10), or stepped slice (0..20..2)")
+	cmd.Flags().IntVar(&offsetFlag, "offset", 0, "Zero-based row offset for pagination")
+	cmd.Flags().IntVarP(&limitFlag, "limit", "l", 0, "Maximum number of rows to return")
+	cmd.Flags().BoolVar(&includeRowNumberFlag, "include-row-number", false, "Inject row index (__row_index__ / #) into output")
 
 	return cmd
 }

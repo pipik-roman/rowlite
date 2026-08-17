@@ -64,6 +64,28 @@ func BenchmarkLargeTable10k_EndToEnd_Select_Regex(b *testing.B) {
 	}
 }
 
+func BenchmarkLargeTable10k_EndToEnd_Select_PositionalSlice(b *testing.B) {
+	path := filepath.Join("testdata", "large_table_10k.md")
+	ctx := context.Background()
+	posOpts := core.PositionalOptions{Index: "0..9999..100"}
+
+	for b.Loop() {
+		cfg, rows, err := core.ParseFrontmatterAndContent(ctx, path, core.ContentModeAll)
+		if err != nil {
+			b.Fatalf("failed: %v", err)
+		}
+		matches, err := core.SelectRows(cfg.Headers, rows, nil)
+		if err != nil {
+			b.Fatalf("SelectRows error: %v", err)
+		}
+		sliced, err := matches.ApplyPositional(posOpts)
+		if err != nil || len(sliced) != 100 {
+			b.Fatalf("ApplyPositional error: %v, len: %d", err, len(sliced))
+		}
+	}
+}
+
+
 func BenchmarkLargeTable10k_EndToEnd_Count_FastPath(b *testing.B) {
 	path := filepath.Join("testdata", "large_table_10k.md")
 	ctx := context.Background()
@@ -210,3 +232,25 @@ func BenchmarkLargeTable10k_InMemory_Sort(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkLargeTable10k_InMemory_Select_PositionalSlice(b *testing.B) {
+	path := filepath.Join("testdata", "large_table_10k.md")
+	ctx := context.Background()
+	cfg, rows, err := core.ParseFrontmatterAndContent(ctx, path, core.ContentModeAll)
+	if err != nil {
+		b.Fatalf("failed: %v", err)
+	}
+	matched, err := core.SelectRows(cfg.Headers, rows, nil)
+	if err != nil {
+		b.Fatalf("SelectRows failed: %v", err)
+	}
+	posOpts := core.PositionalOptions{Index: "0..9999..100"}
+
+	for b.Loop() {
+		sliced, err := matched.ApplyPositional(posOpts)
+		if err != nil || len(sliced) != 100 {
+			b.Fatalf("ApplyPositional error: %v, len: %d", err, len(sliced))
+		}
+	}
+}
+

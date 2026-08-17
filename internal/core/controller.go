@@ -1242,17 +1242,17 @@ func SortTableAction(ctx context.Context, filePath string, byRule string, trigge
 	return AtomicWriteTable(ctx, filePath, cfg, rows)
 }
 
-// Count returns the number of matching rows in the table
-func Count(ctx context.Context, filePath string, where []string) (int, error) {
+// CountWithOptions returns the number of matching rows applying WHERE filters and PositionalOptions.
+func CountWithOptions(ctx context.Context, filePath string, where []string, posOpts PositionalOptions) (int, error) {
 	filters, err := ParseFilters(where)
 	if err != nil {
 		return 0, err
 	}
 
-	// Optimize: if no filters, we don't need to load any rows into memory!
-	mode := ContentModeNone
-	if len(filters) > 0 {
-		mode = ContentModeAll
+	// Optimize: if no filters and no positional constraints, we don't need to load any rows into memory
+	mode := ContentModeAll
+	if len(filters) == 0 && posOpts.IsZero() {
+		mode = ContentModeNone
 	}
 
 	cfg, rows, err := ParseFrontmatterAndContent(ctx, filePath, mode)
@@ -1260,7 +1260,7 @@ func Count(ctx context.Context, filePath string, where []string) (int, error) {
 		return 0, err
 	}
 
-	if len(filters) == 0 {
+	if len(filters) == 0 && posOpts.IsZero() {
 		return cfg.RowCount, nil
 	}
 
@@ -1268,8 +1268,22 @@ func Count(ctx context.Context, filePath string, where []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
+	if !posOpts.IsZero() {
+		matches, err = matches.ApplyPositional(posOpts)
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	return len(matches), nil
 }
+
+// Count returns the number of matching rows in the table
+func Count(ctx context.Context, filePath string, where []string) (int, error) {
+	return CountWithOptions(ctx, filePath, where, PositionalOptions{})
+}
+
 
 // Normalize transforms a string into a canonical lowercase form stripping separators.
 // Example: "Item Name" -> "itemname", "item_name" -> "itemname"

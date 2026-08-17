@@ -32,6 +32,7 @@ These benchmarks measure the **entire end-to-end operation** from raw Markdown f
 | **Filtered Count** | 10,000 rows (1.25 MB) | **~14.4 ms** (14,421,382 ns) | 10.97 MB | 110,815 allocs | Full file read, parse, and filtered count |
 | **Row Append** | 10,000 rows (1.25 MB) | **~15.2 ms** (15,207,642 ns) | 9.70 MB | 110,805 allocs | Uniqueness check, auto-increment generation, audit stamp & disk append |
 | **Substring Search** (`like`) | 10,000 rows (1.25 MB) | **~16.5 ms** (16,543,174 ns) | 11.15 MB | 130,813 allocs | Full file read, parse, and case-insensitive Unicode search |
+| **Positional Slice** (`--index`) | 10,000 rows (1.25 MB) | **~17.7 ms** (17,765,811 ns) | 12.15 MB | 110,831 allocs | Full file read, parse, and stepped slice evaluation (`0..9999..100`) |
 | **Table In-Place Sort** | 10,000 rows (1.25 MB) | **~32.0 ms** (32,044,938 ns) | 10.68 MB | 110,807 allocs | Full file read, parse, and numeric/lexical sort |
 | **Regex Match** | 10,000 rows (1.25 MB) | **~55.8 ms** (55,810,641 ns) | 49.69 MB | 340,872 allocs | Full file read, parse, and regular expression evaluation |
 
@@ -43,6 +44,7 @@ These benchmarks isolate the **query engine performance in memory** when the tab
 
 | Operation | Dataset Size | Execution Time (`ns/op`) | Memory (`B/op`) | Allocations | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Positional Slice** (`--index`) | 10,000 rows in RAM | **~3.65 µs** (3,654 ns) | 5.56 KB | 8 allocs | Pure in-memory stepped slice extraction (`0..9999..100`) |
 | **Exact Match Query** (`==`) | 10,000 rows in RAM | **~0.19 ms** (189,303 ns) | 32 B | 1 alloc | Pure in-memory row selection by ID |
 | **Substring Search** (`like`) | 10,000 rows in RAM | **~2.46 ms** (2,460,302 ns) | 473 KB | 20,011 allocs | Pure in-memory case-insensitive Unicode search |
 | **Table In-Place Sort** | 10,000 rows in RAM | **~20.4 ms** (20,434,261 ns) | 144 B | 5 allocs | In-memory numeric and lexical sorting with timer control |

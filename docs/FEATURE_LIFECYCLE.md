@@ -39,7 +39,7 @@ Every capability must be exposed consistently across both interaction models:
 
 ---
 
-## 4. Performance & Benchmarking
+## 4. Performance, Benchmarking & Inefficiency Regression Checks
 
 * **Isolated Benchmark Files (`*_bench_test.go`)**:
   - Place benchmarks strictly in `*_bench_test.go` files (e.g. [`large_table_bench_test.go`](../internal/core/large_table_bench_test.go)) so normal `go test ./...` test runs stay fast and clean.
@@ -47,8 +47,17 @@ Every capability must be exposed consistently across both interaction models:
   - Use `for b.Loop() { ... }` for all benchmark loops.
   - For state-mutating benchmarks, use `b.StopTimer()` and `b.StartTimer()` around data reset logic.
 * **Dual Perspectives**:
-  - Benchmark both **End-to-End (Cold / Disk-to-Result)** and **In-Memory (Hot / Query Engine / MCP Cache)** performance.
-* **Update [`BENCHMARKS.md`](../BENCHMARKS.md)**: Record updated execution times (`ns/op`), heap sizes (`B/op`), and allocation counts (`allocs/op`).
+  - Benchmark both **End-to-End (Cold / Disk-to-Result)** and **In-Memory (Hot / Query Engine / MCP Cache)** performance across the 10,000-row fixture.
+* **Mandatory Timestamped Snapshot Archiving (`benchmarks/`)**:
+  - Whenever introducing a new feature, optimization, or core refactor, always execute benchmarks (`-count=3`) and save a timestamped snapshot: `benchmarks/YYYY-MM-DD_HHMMSS_<feature_name>.md`.
+  - Update [`benchmarks/README.md`](../benchmarks/README.md) with the new entry and commit metadata.
+* **Performance Delta Auditing & Inefficiency Jump Checks**:
+  - Compare new benchmark numbers against prior snapshot baselines.
+  - Calculate relative latency speedup/slowdown ($\Delta\text{ns/op}$) and memory allocation deltas ($\Delta\text{B/op}$, $\Delta\text{allocs/op}$).
+  - **Inefficiency Guard**: Actively check for and reject unexpected performance regressions (e.g., unintended $O(N)$ allocations on $O(K)$ queries, memory leaks, or unbuffered full-table scans).
+* **Update Documentation & Governance**:
+  - Record the latest verified figures in [`BENCHMARKS.md`](../BENCHMARKS.md).
+  - Update the ⚡ Performance summary table in [`README.md`](../README.md).
 
 ---
 

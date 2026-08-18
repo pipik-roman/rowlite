@@ -27,9 +27,11 @@ These benchmarks measure the **entire end-to-end operation** from raw Markdown f
 
 | Operation | Dataset Size | Execution Time (`ns/op`) | Memory (`B/op`) | Allocations | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Streaming Early Exit** (`--head 1`) | 10,000 rows (1.25 MB) | **~2.66 ms** (2,664,566 ns) | 4.42 MB | 218 allocs | Single-pass file scan with instant break upon match (99.8% alloc reduction) |
 | **Exact Match Query** (`==`) | 10,000 rows (1.25 MB) | **~13.0 ms** (13,010,420 ns) | 10.68 MB | 110,803 allocs | Full file read, parse, and exact match filter |
 | **Fast-Path Count** | 10,000 rows (1.25 MB) | **~14.3 ms** (14,361,470 ns) | 9.70 MB | 110,785 allocs | Fast-path count without loading row bodies |
-| **Filtered Count** | 10,000 rows (1.25 MB) | **~14.4 ms** (14,421,382 ns) | 10.97 MB | 110,815 allocs | Full file read, parse, and filtered count |
+| **Filtered Count** | 10,000 rows (1.25 MB) | **~14.4 ms** (14,421,382 ns) | 9.97 MB | 110,551 allocs | Streaming single-pass filtered count |
+| **Streaming Tail** (`--tail 1`) | 10,000 rows (1.25 MB) | **~15.5 ms** (15,575,106 ns) | 9.68 MB | 110,535 allocs | Single-pass stream scan with $O(1)$ ring buffer |
 | **Row Append** | 10,000 rows (1.25 MB) | **~15.2 ms** (15,207,642 ns) | 9.70 MB | 110,805 allocs | Uniqueness check, auto-increment generation, audit stamp & disk append |
 | **Substring Search** (`like`) | 10,000 rows (1.25 MB) | **~16.5 ms** (16,543,174 ns) | 11.15 MB | 130,813 allocs | Full file read, parse, and case-insensitive Unicode search |
 | **Positional Slice** (`--index`) | 10,000 rows (1.25 MB) | **~17.7 ms** (17,765,811 ns) | 12.15 MB | 110,831 allocs | Full file read, parse, and stepped slice evaluation (`0..9999..100`) |
@@ -44,7 +46,9 @@ These benchmarks isolate the **query engine performance in memory** when the tab
 
 | Operation | Dataset Size | Execution Time (`ns/op`) | Memory (`B/op`) | Allocations | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Streaming Early Exit** (`--head 1`) | 10,000 rows in RAM | **~81.5 ns** (81 ns) | 32 B | 1 alloc | In-memory stream scan with instant pushdown exit |
 | **Positional Slice** (`--index`) | 10,000 rows in RAM | **~3.65 µs** (3,654 ns) | 5.56 KB | 8 allocs | Pure in-memory stepped slice extraction (`0..9999..100`) |
+| **Streaming Tail** (`--tail 1`) | 10,000 rows in RAM | **~0.15 ms** (157,949 ns) | 32 B | 1 alloc | In-memory stream scan with $O(1)$ ring buffer |
 | **Exact Match Query** (`==`) | 10,000 rows in RAM | **~0.19 ms** (189,303 ns) | 32 B | 1 alloc | Pure in-memory row selection by ID |
 | **Substring Search** (`like`) | 10,000 rows in RAM | **~2.46 ms** (2,460,302 ns) | 473 KB | 20,011 allocs | Pure in-memory case-insensitive Unicode search |
 | **Table In-Place Sort** | 10,000 rows in RAM | **~20.4 ms** (20,434,261 ns) | 144 B | 5 allocs | In-memory numeric and lexical sorting with timer control |

@@ -1,0 +1,15 @@
+# Rowlite Historical Benchmark Archive
+
+This directory stores timestamped benchmark snapshots executed across versions and architectural milestones to track performance deltas, memory allocations, and latency profiles over large datasets.
+
+## Naming Convention
+Snapshots are named according to:
+`YYYY-MM-DD_HHMMSS_<milestone_name>.md`
+
+## Benchmark Snapshots Index
+
+| Timestamp | Milestone / State | Commit | Highlights |
+| :--- | :--- | :--- | :--- |
+| **2026-08-18 10:42:00** | [Baseline (Pre-Pushdown)](2026-08-18_104200_baseline.md) | `962cff3` | Baseline performance across 10k dataset prior to streaming pushdown optimization. |
+| **2026-08-18 10:58:00** | [Single-Pass Streaming Pushdown](2026-08-18_105800_streaming_pushdown.md) | `Working` | Early exit & ring buffer pushdown: 5.5x cold speedup, 99.8% alloc reduction, 81.5ns hot head. |
+

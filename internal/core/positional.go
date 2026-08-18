@@ -38,6 +38,86 @@ var (
 	rangeRegex = regexp.MustCompile(`^(-?\d+)(?:\.\.|:)(-?\d+)(?:(?:\.\.|:)(-?\d+))?$`)
 )
 
+// IndexSpecType defines the category of parsed index specification.
+type IndexSpecType int
+
+const (
+	IndexSpecSingle IndexSpecType = iota
+	IndexSpecList
+	IndexSpecRange
+)
+
+// RawIndexSpec represents a parsed index expression before relative normalization.
+type RawIndexSpec struct {
+	Type       IndexSpecType
+	Single     int
+	List       []int
+	RangeStart int
+	RangeEnd   int
+	RangeStep  int
+}
+
+// ParseRawIndexSpec parses an index expression without requiring total row count.
+func ParseRawIndexSpec(spec string) (RawIndexSpec, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return RawIndexSpec{}, fmt.Errorf("empty index specification")
+	}
+
+	// 1. Try JSON array of integers: [0, 2, 4]
+	if strings.HasPrefix(spec, "[") && strings.HasSuffix(spec, "]") {
+		var arr []int
+		if err := json.Unmarshal([]byte(spec), &arr); err == nil {
+			return RawIndexSpec{Type: IndexSpecList, List: arr}, nil
+		}
+	}
+
+	// 2. Try continuous or stepped range: "2..10", "2:10", "0..20..2", "0:20:2"
+	if matches := rangeRegex.FindStringSubmatch(spec); matches != nil {
+		startRaw, _ := strconv.Atoi(matches[1])
+		endRaw, _ := strconv.Atoi(matches[2])
+		step := 1
+		if matches[3] != "" {
+			var err error
+			step, err = strconv.Atoi(matches[3])
+			if err != nil || step <= 0 {
+				return RawIndexSpec{}, fmt.Errorf("invalid step value %q in slice expression (must be a positive integer)", matches[3])
+			}
+		}
+		return RawIndexSpec{
+			Type:       IndexSpecRange,
+			RangeStart: startRaw,
+			RangeEnd:   endRaw,
+			RangeStep:  step,
+		}, nil
+	}
+
+	// 3. Comma-separated list or single integer
+	if strings.Contains(spec, ",") {
+		parts := strings.Split(spec, ",")
+		var list []int
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			val, err := strconv.Atoi(part)
+			if err != nil {
+				return RawIndexSpec{}, fmt.Errorf("invalid index value %q in list %q: %w", part, spec, err)
+			}
+			list = append(list, val)
+		}
+		return RawIndexSpec{Type: IndexSpecList, List: list}, nil
+	}
+
+	// Single integer
+	val, err := strconv.Atoi(spec)
+	if err != nil {
+		return RawIndexSpec{}, fmt.Errorf("invalid index specification %q: %w", spec, err)
+	}
+	return RawIndexSpec{Type: IndexSpecSingle, Single: val}, nil
+}
+
 // ParseIndexSpec parses a flexible index specification against the given totalRows.
 // Supports:
 //   - Single integer: "0", "5", "-1"
@@ -53,82 +133,54 @@ func ParseIndexSpec(spec string, totalRows int) ([]int, error) {
 		return nil, fmt.Errorf("cannot target row index in an empty table")
 	}
 
-	// 1. Try JSON array of integers: [0, 2, 4]
-	if strings.HasPrefix(spec, "[") && strings.HasSuffix(spec, "]") {
-		var arr []int
-		if err := json.Unmarshal([]byte(spec), &arr); err == nil {
-			result := make([]int, 0, len(arr))
-			for _, val := range arr {
-				norm, err := normalizeRelativeIndex(val, totalRows)
-				if err != nil {
-					return nil, err
-				}
-				result = append(result, norm)
-			}
-			return result, nil
-		}
+	raw, err := ParseRawIndexSpec(spec)
+	if err != nil {
+		return nil, err
 	}
 
-	// 2. Try continuous or stepped range: "2..10", "2:10", "0..20..2", "0:20:2"
-	if matches := rangeRegex.FindStringSubmatch(spec); matches != nil {
-		startRaw, _ := strconv.Atoi(matches[1])
-		endRaw, _ := strconv.Atoi(matches[2])
-		step := 1
-		if matches[3] != "" {
-			var err error
-			step, err = strconv.Atoi(matches[3])
-			if err != nil || step <= 0 {
-				return nil, fmt.Errorf("invalid step value %q in slice expression (must be a positive integer)", matches[3])
-			}
+	switch raw.Type {
+	case IndexSpecSingle:
+		norm, err := normalizeRelativeIndex(raw.Single, totalRows)
+		if err != nil {
+			return nil, err
 		}
+		return []int{norm}, nil
 
-		startNorm, err := normalizeRelativeIndex(startRaw, totalRows)
+	case IndexSpecList:
+		result := make([]int, 0, len(raw.List))
+		for _, val := range raw.List {
+			norm, err := normalizeRelativeIndex(val, totalRows)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, norm)
+		}
+		return result, nil
+
+	case IndexSpecRange:
+		startNorm, err := normalizeRelativeIndex(raw.RangeStart, totalRows)
 		if err != nil {
 			return nil, fmt.Errorf("invalid range start: %w", err)
 		}
-		endNorm, err := normalizeRelativeIndex(endRaw, totalRows)
+		endNorm, err := normalizeRelativeIndex(raw.RangeEnd, totalRows)
 		if err != nil {
 			return nil, fmt.Errorf("invalid range end: %w", err)
 		}
 
 		var result []int
 		if startNorm <= endNorm {
-			for i := startNorm; i <= endNorm; i += step {
+			for i := startNorm; i <= endNorm; i += raw.RangeStep {
 				result = append(result, i)
 			}
 		} else {
-			// Descending range if start > end
-			for i := startNorm; i >= endNorm; i -= step {
+			for i := startNorm; i >= endNorm; i -= raw.RangeStep {
 				result = append(result, i)
 			}
 		}
 		return result, nil
 	}
 
-	// 3. Try comma-separated list of integers: "0, 2, 4" or single integer "3"
-	parts := strings.Split(spec, ",")
-	result := make([]int, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		val, err := strconv.Atoi(part)
-		if err != nil {
-			return nil, fmt.Errorf("invalid index specification %q: %w", spec, err)
-		}
-		norm, err := normalizeRelativeIndex(val, totalRows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, norm)
-	}
-
-	if len(result) == 0 {
-		return nil, fmt.Errorf("invalid empty index specification %q", spec)
-	}
-
-	return result, nil
+	return nil, fmt.Errorf("unhandled index spec type")
 }
 
 // ResolvePositionalIndices evaluates PositionalOptions over totalRows to return an ordered slice of target row indices.

@@ -85,6 +85,35 @@ func BenchmarkLargeTable10k_EndToEnd_Select_PositionalSlice(b *testing.B) {
 	}
 }
 
+func BenchmarkLargeTable10k_EndToEnd_Select_Streaming_Head1(b *testing.B) {
+	path := filepath.Join("testdata", "large_table_10k.md")
+	ctx := context.Background()
+	h1 := 1
+	posOpts := core.PositionalOptions{Head: &h1}
+
+	for b.Loop() {
+		_, matches, err := core.ScanAndSelect(ctx, path, nil, posOpts)
+		if err != nil || len(matches) != 1 {
+			b.Fatalf("ScanAndSelect error: %v, len: %d", err, len(matches))
+		}
+	}
+}
+
+func BenchmarkLargeTable10k_EndToEnd_Select_Streaming_Tail1(b *testing.B) {
+	path := filepath.Join("testdata", "large_table_10k.md")
+	ctx := context.Background()
+	t1 := 1
+	posOpts := core.PositionalOptions{Tail: &t1}
+
+	for b.Loop() {
+		_, matches, err := core.ScanAndSelect(ctx, path, nil, posOpts)
+		if err != nil || len(matches) != 1 {
+			b.Fatalf("ScanAndSelect error: %v, len: %d", err, len(matches))
+		}
+	}
+}
+
+
 
 func BenchmarkLargeTable10k_EndToEnd_Count_FastPath(b *testing.B) {
 	path := filepath.Join("testdata", "large_table_10k.md")
@@ -253,4 +282,41 @@ func BenchmarkLargeTable10k_InMemory_Select_PositionalSlice(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkLargeTable10k_InMemory_Select_Streaming_Head1(b *testing.B) {
+	path := filepath.Join("testdata", "large_table_10k.md")
+	ctx := context.Background()
+	cfg, rows, err := core.ParseFrontmatterAndContent(ctx, path, core.ContentModeAll)
+	if err != nil {
+		b.Fatalf("failed: %v", err)
+	}
+	h1 := 1
+	posOpts := core.PositionalOptions{Head: &h1}
+
+	for b.Loop() {
+		matches, err := core.SelectRowsStream(cfg.Headers, rows, nil, posOpts)
+		if err != nil || len(matches) != 1 {
+			b.Fatalf("SelectRowsStream error: %v, len: %d", err, len(matches))
+		}
+	}
+}
+
+func BenchmarkLargeTable10k_InMemory_Select_Streaming_Tail1(b *testing.B) {
+	path := filepath.Join("testdata", "large_table_10k.md")
+	ctx := context.Background()
+	cfg, rows, err := core.ParseFrontmatterAndContent(ctx, path, core.ContentModeAll)
+	if err != nil {
+		b.Fatalf("failed: %v", err)
+	}
+	t1 := 1
+	posOpts := core.PositionalOptions{Tail: &t1}
+
+	for b.Loop() {
+		matches, err := core.SelectRowsStream(cfg.Headers, rows, nil, posOpts)
+		if err != nil || len(matches) != 1 {
+			b.Fatalf("SelectRowsStream error: %v, len: %d", err, len(matches))
+		}
+	}
+}
+
 

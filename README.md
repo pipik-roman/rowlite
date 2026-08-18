@@ -114,62 +114,61 @@ rowlite mcp-setup --client copilot
 - `rowlite sort <file> --by "column:order,..."` - Sort the table. Useful for one-time sort or trigger the sorting from now-on.
 
 ### Querying & Slicing Tables
-Both `rowlite list` and `rowlite count` share a unified, two-stage query evaluation pipeline:
+You can filter table rows by content using `--where`, or select rows by position using `--head`, `--tail`, `--index`, and pagination flags (`--offset`, `--limit`).
 
-$$\text{Table Content} \xrightarrow{\text{1. Content Filtering (--where)}} \text{Matched Records} \xrightarrow{\text{2. Positional Slicing (--head, --tail, --index, pagination)}} \text{Target Rows}$$
-
-When combined, positional parameters (`--head`, `--tail`, `--index`, `--offset`, `--limit`) slice directly across the records that match your `--where` filters.
+When combined, positional flags slice directly within the filtered results (e.g. `--where "status == active" --head 5` returns the first 5 active tasks).
 
 #### 1. Content Filtering (`--where`)
-Filter rows based on column values. Column names are resolved using a **Case-Insensitive & Normalized Lookup** (e.g. `ITEM name`, `item_name`, or `item-name` automatically match the `Item Name` header).
+Filter rows based on column values. Column names are matched flexibly (e.g. `ITEM name`, `item_name`, or `item-name` all match the `Item Name` header).
 
 * **Supported Operators**:
-  * `==` : Exact string equality.
-  * `!=` : Inequality.
-  * `like` : Case-insensitive substring match.
-  * `regex` : Go regular expression match.
+  * `==` : Exact match.
+  * `!=` : Not equal.
+  * `like` : Case-insensitive text search.
+  * `regex` : Regular expression match.
 
-#### 2. Positional Selection & Slicing
-Target rows by their logical positions or apply pagination:
+#### 2. Selecting Rows by Position
+Target rows by line position or paginate through large datasets:
 
-* `--head <N>`, `-H <N>` : Extract first $N$ rows (from start of matching set).
-* `--tail <N>`, `-T <N>` : Extract last $N$ rows (from end of matching set).
-* `--index <spec>`, `-i <spec>` : Target specific row index, list (`"0,2,4"`), range (`"2..10"` / `"2:10"`), or stepped slice (`"0..20..2"` / `"0:20:2"`). Supports negative indices (e.g. `"-1"` targets the last row).
-* `--offset <O>` & `--limit <L>` : Zero-based sliding pagination window.
-* `--include-row-number` : Inject `#` / `__row_index__` into output for stable row references.
+* `--head <N>`, `-H <N>` : Get the first $N$ rows.
+* `--tail <N>`, `-T <N>` : Get the last $N$ rows.
+* `--index <spec>`, `-i <spec>` : Target specific rows (`0`), lists (`"0,2,4"`), ranges (`"2..10"`), or stepped slices (`"0..20..2"`). Negative numbers count from the end (e.g. `"-1"` is the last row).
+* `--offset <O>` & `--limit <L>` : Skip $O$ rows and take up to $L$ rows.
+* `--include-row-number` : Include row numbers (`#` column or `__row_index__` in JSON) in the output.
 
-#### Combined Query Examples
+#### Examples
 ```powershell
-# 1. Content filter combined with positional limits: get top 5 critical tasks
+# 1. Get the first 5 high-priority tasks
 rowlite list tasks.md --where "Priority == High" --head 5
 
-# 2. Substring filter with pagination: get second page of active items (10 per page)
+# 2. Get the second page of active items (10 per page)
 rowlite list tasks.md --where "status like active" --offset 10 --limit 10
 
-# 3. Exact filter with row numbering: inspect last 3 completed tasks
+# 3. Inspect the last 3 completed tasks with row numbers
 rowlite list tasks.md --where "status == done" --tail 3 --include-row-number
 
-# 4. Count matching rows within a positional slice
+# 4. Count active tasks up to a limit of 10
 rowlite count tasks.md --where "status == active" --head 10
 
-# 5. Stepped slice across whole table (even-numbered rows)
+# 5. Extract even-numbered rows across the table
 rowlite list tasks.md --index "0..50..2"
 ```
 
 ## ⚡ Performance
 
-Built in Go for speed, low memory overhead, and zero external dependencies. `rowlite` executes operations on tens of thousands of rows in milliseconds:
+Built in Go for speed, low memory overhead, and zero external dependencies. Benchmarked on a 10,000-row (1.25 MB) Markdown table:
 
-| Dataset | Operation | End-to-End Time (Disk $\rightarrow$ Result) | In-Memory / Cached |
-| :--- | :--- | :--- | :--- |
-| **10,000 rows** (1.25 MB) | Exact Match Query (`--where`) | **~13.0 ms** | **~0.19 ms** |
-| **10,000 rows** (1.25 MB) | Positional Slicing (`--index`) | **~17.7 ms** | **~3.65 µs** |
-| **10,000 rows** (1.25 MB) | Row Append (Auto-Increment + Audit) | **~15.2 ms** | — |
-| **10,000 rows** (1.25 MB) | Fast-Path Count (zero filters) | **~14.3 ms** | — |
-| **10,000 rows** (1.25 MB) | Unicode Substring Search (`like`) | **~16.5 ms** | **~2.46 ms** |
-| **10,000 rows** (1.25 MB) | Full Table In-Place Sort | **~32.0 ms** | **~20.4 ms** |
+| Operation | Execution Time |
+| :--- | :--- |
+| First Rows (`--head`) | **~2.6 ms** |
+| Exact Match (`--where`) | **~13.0 ms** |
+| Fast Count (no filters) | **~14.3 ms** |
+| Add Row (Auto-Increment + Audit) | **~15.2 ms** |
+| Text Search (`like`) | **~16.5 ms** |
+| Row Slicing & Ranges (`--index`) | **~17.7 ms** |
+| Sort Table | **~32.0 ms** |
 
-> For complete end-to-end and in-memory benchmark metrics, test environment specifications, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
+> For in-memory caching benchmarks, memory metrics, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Roadmap
 Currently (2026-08-01) rowlite supports only bare minimum - append operation, simple query, count. Ideally markdown with table only.

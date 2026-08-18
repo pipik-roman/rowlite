@@ -1249,31 +1249,19 @@ func CountWithOptions(ctx context.Context, filePath string, where []string, posO
 		return 0, err
 	}
 
-	// Optimize: if no filters and no positional constraints, we don't need to load any rows into memory
-	mode := ContentModeAll
+	// Optimize: if no filters and no positional constraints, fast-path row count without row parsing
 	if len(filters) == 0 && posOpts.IsZero() {
-		mode = ContentModeNone
-	}
-
-	cfg, rows, err := ParseFrontmatterAndContent(ctx, filePath, mode)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(filters) == 0 && posOpts.IsZero() {
-		return cfg.RowCount, nil
-	}
-
-	matches, err := SelectRows(cfg.Headers, rows, filters)
-	if err != nil {
-		return 0, err
-	}
-
-	if !posOpts.IsZero() {
-		matches, err = matches.ApplyPositional(posOpts)
+		cfg, _, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeNone)
 		if err != nil {
 			return 0, err
 		}
+		return cfg.RowCount, nil
+	}
+
+	// Stream with early termination pushdown
+	_, matches, err := ScanAndSelect(ctx, filePath, filters, posOpts)
+	if err != nil {
+		return 0, err
 	}
 
 	return len(matches), nil

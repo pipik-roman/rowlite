@@ -232,16 +232,9 @@ func NewMcpCmd() *cobra.Command {
 				}
 				headers := cfgParsed.Headers
 
-				matched, err := core.SelectRows(headers, rows, filters)
+				matched, err := core.SelectRowsStream(headers, rows, filters, posOpts)
 				if err != nil {
 					return nil, nil, err
-				}
-
-				if !posOpts.IsZero() {
-					matched, err = matched.ApplyPositional(posOpts)
-					if err != nil {
-						return nil, nil, err
-					}
 				}
 
 				if args.IncludeMetadata {

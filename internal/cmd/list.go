@@ -284,25 +284,13 @@ func NewListCmd() *cobra.Command {
 				return err
 			}
 
-			cfg, rows, err := core.ParseFrontmatterAndContent(cmd.Context(), filePath, core.ContentModeAll)
+			cfg, matched, err := core.ScanAndSelect(cmd.Context(), filePath, filters, posOpts)
 			if err != nil {
 				return err
 			}
 			headers := cfg.Headers
 			if len(headers) == 0 {
 				return fmt.Errorf("no gfm table headers found in %s", filePath)
-			}
-
-			matched, err := core.SelectRows(headers, rows, filters)
-			if err != nil {
-				return err
-			}
-
-			if !posOpts.IsZero() {
-				matched, err = matched.ApplyPositional(posOpts)
-				if err != nil {
-					return err
-				}
 			}
 
 			if formatFlag == "json" {

@@ -825,5 +825,146 @@ func TestFilterFirst_ExecutionOrder_DistinctFromPositionFirst(t *testing.T) {
 	}
 }
 
+func TestListCmd_IncludeMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "meta_test.md")
+
+	initCmd := silenceCmd(cmd.NewInitCmd())
+	initCmd.SetArgs([]string{dbPath, "--columns", "id,name"})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	appCmd := silenceCmd(cmd.NewAppendCmd())
+	appCmd.SetArgs([]string{dbPath, `{"id":"1", "name":"Alice"}`})
+	if err := appCmd.Execute(); err != nil {
+		t.Fatalf("append failed: %v", err)
+	}
+
+	// 1. Test JSON format with --include-metadata
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var jsonBuf bytes.Buffer
+	listCmd.SetOut(&jsonBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "json", "--include-metadata"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list json with metadata failed: %v", err)
+	}
+	jsonOut := jsonBuf.String()
+	if !strings.Contains(jsonOut, `"etag":`) || !strings.Contains(jsonOut, `"total_rows": 1`) || !strings.Contains(jsonOut, `"status": "success"`) {
+		t.Errorf("expected json metadata envelope with etag, got: %s", jsonOut)
+	}
+
+	// 2. Test Markdown format with --include-metadata
+	listCmd = silenceCmd(cmd.NewListCmd())
+	var mdBuf bytes.Buffer
+	listCmd.SetOut(&mdBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "md", "--include-metadata"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list md with metadata failed: %v", err)
+	}
+	mdOut := mdBuf.String()
+	if !strings.Contains(mdOut, "ETag:") || !strings.Contains(mdOut, "Rows: 1") {
+		t.Errorf("expected md metadata header, got: %s", mdOut)
+	}
+
+	// 3. Test CSV format with --include-metadata
+	listCmd = silenceCmd(cmd.NewListCmd())
+	var csvBuf bytes.Buffer
+	listCmd.SetOut(&csvBuf)
+	listCmd.SetArgs([]string{dbPath, "--format", "csv", "--include-metadata"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list csv with metadata failed: %v", err)
+	}
+	csvOut := csvBuf.String()
+	if !strings.Contains(csvOut, "# etag:") || !strings.Contains(csvOut, "total_rows: 1") {
+		t.Errorf("expected csv comment header with etag, got: %s", csvOut)
+	}
+}
+
+func TestAppendCmd_IfMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "append_occ.md")
+
+	initCmd := silenceCmd(cmd.NewInitCmd())
+	initCmd.SetArgs([]string{dbPath, "--columns", "id,name"})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	// Read structure to get initial ETag
+	structCmd := silenceCmd(cmd.NewStructureCmd())
+	var structBuf bytes.Buffer
+	structCmd.SetOut(&structBuf)
+	structCmd.SetArgs([]string{dbPath})
+	if err := structCmd.Execute(); err != nil {
+		t.Fatalf("structure failed: %v", err)
+	}
+	structOut := structBuf.String()
+	var initialETag string
+	for _, line := range strings.Split(structOut, "\n") {
+		if strings.HasPrefix(line, "ETag: ") {
+			initialETag = strings.TrimSpace(strings.TrimPrefix(line, "ETag: "))
+			break
+		}
+	}
+	if initialETag == "" {
+		t.Fatalf("failed to extract ETag from structure output:\n%s", structOut)
+	}
+
+	// 1. Append with matching --if-match
+	appCmd := silenceCmd(cmd.NewAppendCmd())
+	appCmd.SetArgs([]string{dbPath, `{"id":"1", "name":"Alice"}`, "--if-match", initialETag})
+	if err := appCmd.Execute(); err != nil {
+		t.Fatalf("append with valid --if-match failed: %v", err)
+	}
+
+	// 2. Attempt append with stale ETag (should fail)
+	appCmd2 := silenceCmd(cmd.NewAppendCmd())
+	appCmd2.SetArgs([]string{dbPath, `{"id":"2", "name":"Bob"}`, "--if-match", initialETag})
+	err := appCmd2.Execute()
+	if err == nil {
+		t.Fatalf("expected append with stale --if-match to fail, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "precondition failed") {
+		t.Errorf("expected precondition failed error message, got: %v", err)
+	}
+
+	// 3. Verify append with --if-checksum alias
+	structBuf.Reset()
+	if err := structCmd.Execute(); err != nil {
+		t.Fatalf("structure failed: %v", err)
+	}
+	var secondETag string
+	for _, line := range strings.Split(structBuf.String(), "\n") {
+		if strings.HasPrefix(line, "ETag: ") {
+			secondETag = strings.TrimSpace(strings.TrimPrefix(line, "ETag: "))
+			break
+		}
+	}
+	appCmd3 := silenceCmd(cmd.NewAppendCmd())
+	appCmd3.SetArgs([]string{dbPath, `{"id":"2", "name":"Bob"}`, "--if-checksum", secondETag})
+	if err := appCmd3.Execute(); err != nil {
+		t.Fatalf("append with --if-checksum failed: %v", err)
+	}
+
+	// 4. Verify append with --checksum alias
+	structBuf.Reset()
+	if err := structCmd.Execute(); err != nil {
+		t.Fatalf("structure failed: %v", err)
+	}
+	var thirdETag string
+	for _, line := range strings.Split(structBuf.String(), "\n") {
+		if strings.HasPrefix(line, "ETag: ") {
+			thirdETag = strings.TrimSpace(strings.TrimPrefix(line, "ETag: "))
+			break
+		}
+	}
+	appCmd4 := silenceCmd(cmd.NewAppendCmd())
+	appCmd4.SetArgs([]string{dbPath, `{"id":"3", "name":"Charlie"}`, "--checksum", thirdETag})
+	if err := appCmd4.Execute(); err != nil {
+		t.Fatalf("append with --checksum failed: %v", err)
+	}
+}
+
 
 

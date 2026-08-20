@@ -26,6 +26,9 @@ func NewStructureCmd() *cobra.Command {
 				return fmt.Errorf("table headers not found in %s", filePath)
 			}
 
+			if cfg.ETag != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "ETag: %s\n", cfg.ETag)
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Columns: %s\n", strings.Join(headers, ", "))
 			if len(align) > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "Alignments: %s\n", strings.Join(align, ", "))

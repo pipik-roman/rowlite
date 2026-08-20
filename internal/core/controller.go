@@ -108,6 +108,7 @@ type TableConfig struct {
 	MaxAutoIncVal    int
 	RowCount         int
 	IsSortColUnique  bool
+	ETag             string
 }
 
 func (tc TableConfig) NumColumns() int {
@@ -523,6 +524,7 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 
 	cfg.RowCount = rowCount
 	cfg.MaxAutoIncVal = maxAutoIncVal
+	cfg.ETag = ComputeETag(allBytes)
 
 	if actualMode == ContentModeLast && lastRow != nil {
 		rows = [][]string{lastRow}
@@ -1083,6 +1085,22 @@ func AppendRows(
 	existingRows [][]string,
 	newRows []map[string]string,
 ) error {
+	return AppendRowsWithOptions(ctx, filePath, cfg, existingRows, newRows, "")
+}
+
+// AppendRowsWithOptions appends multiple rows validating precondition ETag, uniqueness, sorting, auditing, and change logging
+func AppendRowsWithOptions(
+	ctx context.Context,
+	filePath string,
+	cfg TableConfig,
+	existingRows [][]string,
+	newRows []map[string]string,
+	ifMatch string,
+) error {
+	if err := VerifyETag(ifMatch, cfg.ETag); err != nil {
+		return err
+	}
+
 	if len(newRows) == 0 {
 		return nil
 	}
@@ -1194,6 +1212,11 @@ func AppendRows(
 
 // Append parses the table and appends a raw input string (JSON/CSV)
 func Append(ctx context.Context, filePath string, input string) error {
+	return AppendWithOptions(ctx, filePath, input, "")
+}
+
+// AppendWithOptions parses the table and appends a raw input string with OCC precondition validation
+func AppendWithOptions(ctx context.Context, filePath string, input string, ifMatch string) error {
 	cfg, existingRows, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeAuto)
 	if err != nil {
 		return err
@@ -1202,16 +1225,21 @@ func Append(ctx context.Context, filePath string, input string) error {
 	if err != nil {
 		return err
 	}
-	return AppendRows(ctx, filePath, cfg, existingRows, parsedRows)
+	return AppendRowsWithOptions(ctx, filePath, cfg, existingRows, parsedRows, ifMatch)
 }
 
 // AppendRow parses the table and appends a single parsed row map
 func AppendRow(ctx context.Context, filePath string, rowMap map[string]string) error {
+	return AppendRowWithOptions(ctx, filePath, rowMap, "")
+}
+
+// AppendRowWithOptions parses the table and appends a single parsed row map with OCC precondition validation
+func AppendRowWithOptions(ctx context.Context, filePath string, rowMap map[string]string, ifMatch string) error {
 	cfg, existingRows, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeAuto)
 	if err != nil {
 		return err
 	}
-	return AppendRows(ctx, filePath, cfg, existingRows, []map[string]string{rowMap})
+	return AppendRowsWithOptions(ctx, filePath, cfg, existingRows, []map[string]string{rowMap}, ifMatch)
 }
 
 // SortTableAction sorts the table either one-time or triggers auto-sorting configuration updates

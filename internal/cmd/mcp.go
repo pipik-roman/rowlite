@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -255,6 +256,7 @@ func NewMcpCmd() *cobra.Command {
 					metaResponse := map[string]any{
 						"status": "success",
 						"meta": map[string]any{
+							"etag":              cfgParsed.ETag,
 							"total_rows":        cfgParsed.RowCount,
 							"returned_rows":     len(matched),
 							"offset":            posOpts.Offset,
@@ -333,15 +335,38 @@ func NewMcpCmd() *cobra.Command {
 			})
 
 			type AppendRowArgs struct {
-				File string            `json:"file" jsonschema:"path to the markdown file"`
-				Row  map[string]string `json:"row" jsonschema:"JSON object mapping column names to cell values"`
+				File       string            `json:"file" jsonschema:"path to the markdown file"`
+				Row        map[string]string `json:"row" jsonschema:"JSON object mapping column names to cell values"`
+				IfMatch    string            `json:"if_match,omitempty" jsonschema:"expected ETag checksum of the table before appending (for optimistic concurrency control)"`
+				IfChecksum string            `json:"if_checksum,omitempty" jsonschema:"alias for if_match (expected table checksum)"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_append",
-				Description: "Append a row to the GFM table (validates unique keys, applies auto-increment, updates audit timestamps, auto-sorts if configured, and logs to change journal)",
+				Description: "Append a row to the GFM table (validates unique keys, applies auto-increment, updates audit timestamps, auto-sorts if configured, logs to change journal, and supports optimistic concurrency control via if_match)",
 			}, func(ctx context.Context, req *mcp.CallToolRequest, args AppendRowArgs) (*mcp.CallToolResult, any, error) {
-				err := core.AppendRow(ctx, args.File, args.Row)
+				expectedHash := args.IfMatch
+				if expectedHash == "" {
+					expectedHash = args.IfChecksum
+				}
+				err := core.AppendRowWithOptions(ctx, args.File, args.Row, expectedHash)
 				if err != nil {
+					var precondErr *core.PreconditionFailedError
+					if errors.As(err, &precondErr) {
+						errPayload := map[string]any{
+							"status":        "error",
+							"error_code":    "PRECONDITION_FAILED",
+							"message":       fmt.Sprintf("Table content has changed since the provided ETag ('%s'). Current ETag is '%s'. Re-read table and retry.", precondErr.ExpectedETag, precondErr.CurrentETag),
+							"expected_etag": precondErr.ExpectedETag,
+							"current_etag":  precondErr.CurrentETag,
+						}
+						errBytes, _ := json.MarshalIndent(errPayload, "", "  ")
+						return &mcp.CallToolResult{
+							IsError: true,
+							Content: []mcp.Content{
+								&mcp.TextContent{Text: string(errBytes)},
+							},
+						}, nil, nil
+					}
 					return nil, nil, err
 				}
 				return &mcp.CallToolResult{
@@ -384,6 +409,9 @@ func NewMcpCmd() *cobra.Command {
 				}
 
 				var sb strings.Builder
+				if cfg.ETag != "" {
+					sb.WriteString(fmt.Sprintf("ETag: %s\n", cfg.ETag))
+				}
 				sb.WriteString(fmt.Sprintf("Columns: %s\n", strings.Join(cfg.Headers, ", ")))
 				if len(cfg.Alignments) > 0 {
 					sb.WriteString(fmt.Sprintf("Alignments: %s\n", strings.Join(cfg.Alignments, ", ")))

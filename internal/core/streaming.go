@@ -428,6 +428,7 @@ func ScanAndSelect(ctx context.Context, filePath string, filters []Filter, posOp
 		Sort:          raw.Rowlite.Sort,
 		Audit:         raw.Rowlite.Audit,
 		AutoIncrement: raw.Rowlite.AutoIncrement,
+		ETag:          ComputeETag(allBytes),
 	}
 	if cfg.AutoIncrement.Column != "" && cfg.AutoIncrement.Step <= 0 {
 		cfg.AutoIncrement.Step = 1
@@ -546,6 +547,8 @@ func ScanAndSelect(ctx context.Context, filePath string, filters []Filter, posOp
 	}
 
 scanComplete:
+	cfg.RowCount = physicalRowIdx
+
 	// Step 3: Finalize result set based on strategy
 	switch plan.Strategy {
 	case StrategyRingBuffer:

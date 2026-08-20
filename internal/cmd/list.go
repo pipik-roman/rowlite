@@ -245,6 +245,7 @@ func NewListCmd() *cobra.Command {
 	var offsetFlag int
 	var limitFlag int
 	var includeRowNumberFlag bool
+	var includeMetadataFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "list <file>",
@@ -294,11 +295,59 @@ func NewListCmd() *cobra.Command {
 			}
 
 			if formatFlag == "json" {
+				if includeMetadataFlag {
+					dataSlice := make([]map[string]any, len(matched))
+					for i, mr := range matched {
+						obj := make(map[string]any)
+						if includeRowNumberFlag {
+							obj["__row_index__"] = mr.Index
+						}
+						for colIdx, h := range headers {
+							val := ""
+							if colIdx < len(mr.Row) {
+								val = mr.Row[colIdx]
+							}
+							obj[h] = val
+						}
+						dataSlice[i] = obj
+					}
+
+					metaResponse := map[string]any{
+						"status": "success",
+						"meta": map[string]any{
+							"etag":              cfg.ETag,
+							"total_rows":        cfg.RowCount,
+							"returned_rows":     len(matched),
+							"offset":            posOpts.Offset,
+							"indices_retrieved": matched.Indices(),
+						},
+						"schema": map[string]any{
+							"columns": headers,
+						},
+						"data": dataSlice,
+					}
+					encoder := json.NewEncoder(cmd.OutOrStdout())
+					encoder.SetEscapeHTML(false)
+					encoder.SetIndent("", "  ")
+					return encoder.Encode(metaResponse)
+				}
+
 				renderer := JSONRenderer{
 					IncludeRowIndex: includeRowNumberFlag,
 					Matched:         matched,
 				}
 				return renderer.Render(cmd.OutOrStdout(), headers, matched.Rows())
+			}
+
+			if includeMetadataFlag {
+				switch formatFlag {
+				case "csv":
+					fmt.Fprintf(cmd.OutOrStdout(), "# etag: %s, total_rows: %d\n", cfg.ETag, cfg.RowCount)
+				case "tsv":
+					fmt.Fprintf(cmd.OutOrStdout(), "# etag: %s\ttotal_rows: %d\n", cfg.ETag, cfg.RowCount)
+				default:
+					fmt.Fprintf(cmd.OutOrStdout(), "ETag: %s | Rows: %d\n\n", cfg.ETag, cfg.RowCount)
+				}
 			}
 
 			renderHeaders := headers
@@ -346,6 +395,7 @@ func NewListCmd() *cobra.Command {
 	cmd.Flags().IntVar(&offsetFlag, "offset", 0, "Zero-based row offset for pagination")
 	cmd.Flags().IntVarP(&limitFlag, "limit", "l", 0, "Maximum number of rows to return")
 	cmd.Flags().BoolVar(&includeRowNumberFlag, "include-row-number", false, "Inject row index (__row_index__ / #) into output")
+	cmd.Flags().BoolVarP(&includeMetadataFlag, "include-metadata", "m", false, "Include ETag and summary metadata in output")
 
 	return cmd
 }

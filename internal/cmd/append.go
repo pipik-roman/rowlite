@@ -11,10 +11,16 @@ import (
 	"github.com/pipik-roman/rowlite/internal/core"
 )
 
-const rowFlagName = "row"
+const (
+	rowFlagName     = "row"
+	ifMatchFlagName = "if-match"
+)
 
 func NewAppendCmd() *cobra.Command {
 	var rowFlag string
+	var ifMatchFlag string
+	var ifChecksumFlag string
+	var checksumFlag string
 	cmd := &cobra.Command{
 		Use:   "append <file> [data-string]",
 		Short: "Append row values to table (supports JSON/CSV strings and stdin)",
@@ -45,11 +51,23 @@ func NewAppendCmd() *cobra.Command {
 				return fmt.Errorf("data string content is required either as a positional argument, via --row flag, or piped to stdin")
 			}
 
-			return core.Append(cmd.Context(), filePath, dataStr)
+			expectedHash := ifMatchFlag
+			if expectedHash == "" {
+				if ifChecksumFlag != "" {
+					expectedHash = ifChecksumFlag
+				} else if checksumFlag != "" {
+					expectedHash = checksumFlag
+				}
+			}
+
+			return core.AppendWithOptions(cmd.Context(), filePath, dataStr, expectedHash)
 		},
 	}
 
 	cmd.Flags().StringVar(&rowFlag, rowFlagName, "", "JSON row object to append")
+	cmd.Flags().StringVar(&ifMatchFlag, ifMatchFlagName, "", "Precondition table checksum (ETag) for optimistic concurrency control")
+	cmd.Flags().StringVar(&ifChecksumFlag, "if-checksum", "", "Alias for --if-match (precondition table checksum)")
+	cmd.Flags().StringVar(&checksumFlag, "checksum", "", "Alias for --if-match (precondition table checksum)")
 
 	return cmd
 }

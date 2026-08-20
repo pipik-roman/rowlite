@@ -106,10 +106,10 @@ rowlite mcp-setup --client copilot
 ## CLI Commands
 - `rowlite help` - See CLI help for details
 - `rowlite init <file> [--columns "id,name"] [--unique "id"] [--sort "id:asc"] [--autoincrement "id:10"] [--journal-log "journal.log"]` - Create new markdown table file or update frontmatter constraints in-place. 
-- `rowlite structure <file>` - Display column names, constraints, and audit log mappings.
-- `rowlite list <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--format json|csv|tsv|md|pretty] [--include-row-number]` - Query, filter, and slice rows.
+- `rowlite structure <file>` - Display column names, constraints, audit log mappings, and current ETag checksum.
+- `rowlite list <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--format json|csv|tsv|md|pretty] [--include-row-number] [--include-metadata]` - Query, filter, and slice rows.
 - `rowlite count <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L]` - Count queried, filtered, or sliced rows.
-- `rowlite append <file> --row '{"col1": "val1"}'` - Append a row, applying validations. Use JSON or CSV.
+- `rowlite append <file> --row '{"col1": "val1"}' [--if-match "<etag>" | --if-checksum "<etag>" | --checksum "<etag>"]` - Append a row, applying validations and optional OCC precondition. Use JSON or CSV.
 - `rowlite dedupe <file> --column <name>` - Purge duplicate records in place.
 - `rowlite sort <file> --by "column:order,..."` - Sort the table. Useful for one-time sort or trigger the sorting from now-on.
 
@@ -135,6 +135,22 @@ Target rows by line position or paginate through large datasets:
 * `--index <spec>`, `-i <spec>` : Target specific rows (`0`), lists (`"0,2,4"`), ranges (`"2..10"`), or stepped slices (`"0..20..2"`). Negative numbers count from the end (e.g. `"-1"` is the last row).
 * `--offset <O>` & `--limit <L>` : Skip $O$ rows and take up to $L$ rows.
 * `--include-row-number` : Include row numbers (`#` column or `__row_index__` in JSON) in the output.
+* `--include-metadata`, `-m` : Include table ETag checksum and row totals in output.
+
+#### 3. Optimistic Concurrency Control (`--if-match` / `--if-checksum` / `--checksum`)
+When multiple human users or AI agents interact with the same table, race conditions can cause lost updates or sequence conflicts. Rowlite computes a canonical SHA-256 ETag checksum over the table to guarantee state continuity:
+
+```bash
+# 1. Read table and obtain current ETag / Checksum
+rowlite list tasks.md --format json --include-metadata
+# Returns: "meta": { "etag": "a3f8c9b1", "total_rows": 42 }
+
+# 2. Append safely with precondition guarantee (accepts --if-match, --if-checksum, or --checksum)
+rowlite append tasks.md '{"task": "Deploy service"}' --if-match a3f8c9b1
+# Or using the intuitive checksum alias:
+rowlite append tasks.md '{"task": "Deploy service"}' --if-checksum a3f8c9b1
+# If another process modified tasks.md in the meantime, the append safely aborts with PRECONDITION_FAILED
+```
 
 #### Examples
 ```powershell

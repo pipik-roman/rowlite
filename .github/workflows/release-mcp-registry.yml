@@ -51,7 +51,7 @@ jobs:
         run: |
           TAG="${{ steps.parse_version.outputs.tag }}"
           SEMVER="${{ steps.parse_version.outputs.semver }}"
-          SHA256="${{ steps.parse_version.outputs.sha256 }}"
+          SHA256="${{ steps.fetch_checksum.outputs.sha256 }}"
           REPO="${{ github.repository }}"
           REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
 

@@ -93,4 +93,10 @@ func TestMCPConfigCache_WithETag(t *testing.T) {
 	if cfg2.ETag != cfg1.ETag {
 		t.Errorf("expected cached ETag %q, got %q", cfg1.ETag, cfg2.ETag)
 	}
+
+	// 3. Invalidate cache
+	cache.Invalidate(filePath)
+	if _, ok := cache.items[filePath]; ok {
+		t.Errorf("expected item to be deleted from cache after Invalidate")
+	}
 }

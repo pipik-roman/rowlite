@@ -966,5 +966,103 @@ func TestAppendCmd_IfMatch(t *testing.T) {
 	}
 }
 
+func TestUpdateCmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "tasks.md")
+
+	content := `| id | title | status | priority |
+| --- | --- | --- | --- |
+| 1 | Task 1 | Pending | High |
+| 2 | Task 2 | Pending | Medium |
+| 3 | Task 3 | Completed | Low |
+`
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// 1. Update using --where and --set
+	updateCmd1 := silenceCmd(cmd.NewUpdateCmd())
+	var out1 bytes.Buffer
+	updateCmd1.SetOut(&out1)
+	updateCmd1.SetArgs([]string{dbPath, "--where", "status == Pending", "--set", "status=Processing"})
+	if err := updateCmd1.Execute(); err != nil {
+		t.Fatalf("update with --where and --set failed: %v", err)
+	}
+	if !strings.Contains(out1.String(), "Successfully updated 2 row(s)") {
+		t.Errorf("unexpected output: %s", out1.String())
+	}
+
+	// 2. Update single row using --index and --data
+	updateCmd2 := silenceCmd(cmd.NewUpdateCmd())
+	var out2 bytes.Buffer
+	updateCmd2.SetOut(&out2)
+	updateCmd2.SetArgs([]string{dbPath, "--index", "0", "--data", `{"priority":"Urgent"}`})
+	if err := updateCmd2.Execute(); err != nil {
+		t.Fatalf("update with --index and --data failed: %v", err)
+	}
+	if !strings.Contains(out2.String(), "Successfully updated 1 row(s)") {
+		t.Errorf("unexpected output: %s", out2.String())
+	}
+
+	// 3. Verify final list content
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var listBuf bytes.Buffer
+	listCmd.SetOut(&listBuf)
+	listCmd.SetArgs([]string{dbPath, "-o", "json"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	listJson := listBuf.String()
+	if !strings.Contains(listJson, "Urgent") || !strings.Contains(listJson, "Processing") {
+		t.Errorf("expected updated values in list json, got:\n%s", listJson)
+	}
+}
+
+func TestUpdateCmd_OCC(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "items.md")
+	content := "| id | status |\n| --- | --- |\n| 1 | Open |\n"
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	structCmd := silenceCmd(cmd.NewStructureCmd())
+	var structBuf bytes.Buffer
+	structCmd.SetOut(&structBuf)
+	structCmd.SetArgs([]string{dbPath})
+	if err := structCmd.Execute(); err != nil {
+		t.Fatalf("structure failed: %v", err)
+	}
+	var etag string
+	for _, line := range strings.Split(structBuf.String(), "\n") {
+		if strings.HasPrefix(line, "ETag: ") {
+			etag = strings.TrimSpace(strings.TrimPrefix(line, "ETag: "))
+			break
+		}
+	}
+	if etag == "" {
+		t.Fatalf("failed to obtain ETag")
+	}
+
+	// 1. Success with valid ETag
+	upCmd1 := silenceCmd(cmd.NewUpdateCmd())
+	upCmd1.SetArgs([]string{dbPath, "--where", "id == 1", "--set", "status=Active", "--if-match", etag})
+	if err := upCmd1.Execute(); err != nil {
+		t.Fatalf("update with matching ETag failed: %v", err)
+	}
+
+	// 2. Mismatch with stale ETag
+	upCmd2 := silenceCmd(cmd.NewUpdateCmd())
+	upCmd2.SetArgs([]string{dbPath, "--where", "id == 1", "--set", "status=Closed", "--if-match", etag})
+	err := upCmd2.Execute()
+	if err == nil {
+		t.Fatalf("expected update with stale ETag to fail, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "precondition failed") {
+		t.Errorf("expected precondition failed error message, got: %v", err)
+	}
+}
+
+
 
 

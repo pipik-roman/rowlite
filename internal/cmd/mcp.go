@@ -68,6 +68,12 @@ func (c *TableConfigCache) GetOrParse(ctx context.Context, filePath string, mode
 	return cfg, rows, nil
 }
 
+func (c *TableConfigCache) Invalidate(filePath string) {
+	c.mu.Lock()
+	delete(c.items, filePath)
+	c.mu.Unlock()
+}
+
 func parseIndexArg(raw any) string {
 	if raw == nil {
 		return ""
@@ -372,6 +378,66 @@ func NewMcpCmd() *cobra.Command {
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
 						&mcp.TextContent{Text: "Row successfully appended"},
+					},
+				}, nil, nil
+			})
+
+			type UpdateRowsArgs struct {
+				File       string            `json:"file" jsonschema:"path to the markdown file"`
+				Where      []string          `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['status == Pending', 'priority like high'])"`
+				Head       *int              `json:"head,omitempty" jsonschema:"target first N matching rows"`
+				Tail       *int              `json:"tail,omitempty" jsonschema:"target last N matching rows"`
+				Index      any               `json:"index,omitempty" jsonschema:"target row index (e.g. 0, -1), list ([0,2,4]), range ('2..10'), or stepped slice ('0..20..2')"`
+				Offset     int               `json:"offset,omitempty" jsonschema:"zero-based offset for pagination"`
+				Limit      *int              `json:"limit,omitempty" jsonschema:"maximum number of rows to update"`
+				Set        map[string]string `json:"set" jsonschema:"key-value map of column names to updated cell values"`
+				IfMatch    string            `json:"if_match,omitempty" jsonschema:"expected ETag checksum of the table before updating (for optimistic concurrency control)"`
+				IfChecksum string            `json:"if_checksum,omitempty" jsonschema:"alias for if_match (expected table checksum)"`
+			}
+			mcp.AddTool(server, &mcp.Tool{
+				Name:        "rowlite_update",
+				Description: "Update matching rows in a GFM table (validates unique keys, updates audit timestamps, auto-sorts if configured, logs to change journal, and supports optimistic concurrency control via if_match)",
+			}, func(ctx context.Context, req *mcp.CallToolRequest, args UpdateRowsArgs) (*mcp.CallToolResult, any, error) {
+				expectedHash := args.IfMatch
+				if expectedHash == "" {
+					expectedHash = args.IfChecksum
+				}
+
+				posOpts := core.PositionalOptions{
+					Head:   args.Head,
+					Tail:   args.Tail,
+					Index:  parseIndexArg(args.Index),
+					Offset: args.Offset,
+					Limit:  args.Limit,
+				}
+
+				count, err := core.UpdateWithOptions(ctx, args.File, args.Where, posOpts, args.Set, expectedHash)
+				if err != nil {
+					var precondErr *core.PreconditionFailedError
+					if errors.As(err, &precondErr) {
+						errPayload := map[string]any{
+							"status":        "error",
+							"error_code":    "PRECONDITION_FAILED",
+							"message":       fmt.Sprintf("Table content has changed since the provided ETag ('%s'). Current ETag is '%s'. Re-read table and retry.", precondErr.ExpectedETag, precondErr.CurrentETag),
+							"expected_etag": precondErr.ExpectedETag,
+							"current_etag":  precondErr.CurrentETag,
+						}
+						errBytes, _ := json.MarshalIndent(errPayload, "", "  ")
+						return &mcp.CallToolResult{
+							IsError: true,
+							Content: []mcp.Content{
+								&mcp.TextContent{Text: string(errBytes)},
+							},
+						}, nil, nil
+					}
+					return nil, nil, err
+				}
+
+				cache.Invalidate(args.File)
+
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("Successfully updated %d row(s)", count)},
 					},
 				}, nil, nil
 			})

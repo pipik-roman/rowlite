@@ -1,0 +1,535 @@
+package core
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+// ParseSetExpressions parses key-value assignment strings (e.g. "status=done", "count=5", "notes=checked").
+// Supports multiple arguments and comma-separated pairs.
+func ParseSetExpressions(setList []string) (map[string]string, error) {
+	if len(setList) == 0 {
+		return nil, fmt.Errorf("no assignment expressions provided")
+	}
+
+	assignments := make(map[string]string)
+	for _, item := range setList {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+
+		// Handle comma-separated pairs: "status=done, priority=high"
+		var parts []string
+		if strings.Contains(item, ",") && !strings.Contains(item, `\,`) {
+			parts = strings.Split(item, ",")
+		} else {
+			parts = []string{item}
+		}
+
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) != 2 {
+				return nil, fmt.Errorf("invalid assignment expression %q (expected format: column=value)", part)
+			}
+			k := strings.TrimSpace(kv[0])
+			v := strings.TrimSpace(kv[1])
+			if k == "" {
+				return nil, fmt.Errorf("column name cannot be empty in assignment %q", part)
+			}
+			assignments[k] = v
+		}
+	}
+
+	if len(assignments) == 0 {
+		return nil, fmt.Errorf("no valid column assignments found in expressions")
+	}
+
+	return assignments, nil
+}
+
+// ParseUpdateData parses a raw JSON or key-value string into an assignment map.
+func ParseUpdateData(input string) (map[string]string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty update data string")
+	}
+
+	// Try JSON object: {"status":"active", "priority":"high"}
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		var assignments map[string]string
+		err := json.Unmarshal([]byte(trimmed), &assignments)
+		if err != nil {
+			// Try map[string]any for numeric/boolean values
+			var anyMap map[string]any
+			if anyErr := json.Unmarshal([]byte(trimmed), &anyMap); anyErr == nil {
+				assignments = make(map[string]string, len(anyMap))
+				for k, v := range anyMap {
+					assignments[k] = fmt.Sprint(v)
+				}
+				return assignments, nil
+			}
+			return nil, fmt.Errorf("invalid update JSON object: %w", err)
+		}
+		return assignments, nil
+	}
+
+	// Fallback to comma/equals parsing
+	return ParseSetExpressions([]string{trimmed})
+}
+
+// ApplyRowUpdate applies assignment mutations against a row's pre-state snapshot and auto-stamps edit audit columns.
+func ApplyRowUpdate(
+	headers []string,
+	originalRow []string,
+	resolvedUpdates map[string]string,
+	cfg TableConfig,
+	timestamp string,
+) ([]string, map[string]string, error) {
+	newRow := make([]string, len(headers))
+	for i := range headers {
+		if i < len(originalRow) {
+			newRow[i] = originalRow[i]
+		}
+	}
+
+	mutatedMap := make(map[string]string, len(resolvedUpdates))
+
+	// Apply explicit updates against original snapshot
+	for colName, newVal := range resolvedUpdates {
+		colIdx, canonicalName, err := ResolveColumn(headers, colName)
+		if err != nil {
+			return nil, nil, err
+		}
+		newRow[colIdx] = newVal
+		mutatedMap[canonicalName] = newVal
+	}
+
+	// Auto-stamp edit audit columns if not explicitly overridden
+	for _, colIdx := range cfg.AuditIndices {
+		if colIdx < len(headers) {
+			colName := headers[colIdx]
+			if IsEditAuditColumn(colName, cfg) {
+				if _, explicitlySet := mutatedMap[colName]; !explicitlySet {
+					newRow[colIdx] = timestamp
+					mutatedMap[colName] = timestamp
+				}
+			}
+		}
+	}
+
+	return newRow, mutatedMap, nil
+}
+
+// UpdateWithOptions parses the table and updates matching rows applying WHERE filters, positional slicing, constraints, and OCC.
+func UpdateWithOptions(
+	ctx context.Context,
+	filePath string,
+	where []string,
+	posOpts PositionalOptions,
+	updates map[string]string,
+	ifMatch string,
+) (int, error) {
+	if len(updates) == 0 {
+		return 0, fmt.Errorf("no column assignments specified for update")
+	}
+
+	// Step 1: Precondition check (Optimistic Concurrency Control)
+	if ifMatch != "" {
+		currentETag, err := ComputeFileETag(filePath)
+		if err != nil {
+			return 0, err
+		}
+		if err := VerifyETag(ifMatch, currentETag); err != nil {
+			return 0, err
+		}
+	}
+
+	// Step 2: Parse table configuration
+	cfg, _, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeNone)
+	if err != nil {
+		return 0, err
+	}
+	headers := cfg.Headers
+	if len(headers) == 0 {
+		return 0, fmt.Errorf("no gfm table found in %s", filePath)
+	}
+
+	// Step 3: Resolve update column names to canonical header names
+	resolvedUpdates := make(map[string]string, len(updates))
+	for k, v := range updates {
+		_, canonicalName, err := ResolveColumn(headers, k)
+		if err != nil {
+			return 0, err
+		}
+		resolvedUpdates[canonicalName] = v
+	}
+
+	// Step 4: Parse WHERE filters
+	filters, err := ParseFilters(where)
+	if err != nil {
+		return 0, err
+	}
+
+	// Step 5: Check if any sort column is modified
+	isSortKeyModified := false
+	if cfg.IsSorted() {
+		for _, rule := range cfg.SortRules {
+			if rule.ColIdx < len(headers) {
+				sortCol := headers[rule.ColIdx]
+				if _, ok := resolvedUpdates[sortCol]; ok {
+					isSortKeyModified = true
+					break
+				}
+			}
+		}
+	}
+
+	// Step 6: Check if any unique column is modified
+	isUniqueKeyModified := false
+	for _, uIdx := range cfg.UniqueIndices {
+		if uIdx < len(headers) {
+			uCol := headers[uIdx]
+			if _, ok := resolvedUpdates[uCol]; ok {
+				isUniqueKeyModified = true
+				break
+			}
+		}
+	}
+
+	// Check if autoincrement column is updated and validate
+	if cfg.AutoIncrementIdx >= 0 && cfg.AutoIncrementIdx < len(headers) {
+		autoIncCol := headers[cfg.AutoIncrementIdx]
+		if _, ok := resolvedUpdates[autoIncCol]; ok {
+			// AutoIncrement column updated explicitly - allowed if valid integer
+		}
+	}
+
+	// EXECUTION PATH A: In-Memory Stable Re-sort Path (only when a sort key is mutated)
+	if isSortKeyModified {
+		return inMemoryUpdateAndSort(ctx, filePath, cfg, filters, posOpts, resolvedUpdates, isUniqueKeyModified)
+	}
+
+	// EXECUTION PATH B: Fast Streaming Workfile Path (O(1) memory for standard updates)
+	return streamUpdateWorkfile(ctx, filePath, cfg, filters, posOpts, resolvedUpdates, isUniqueKeyModified)
+}
+
+func inMemoryUpdateAndSort(
+	ctx context.Context,
+	filePath string,
+	cfg TableConfig,
+	filters []Filter,
+	posOpts PositionalOptions,
+	resolvedUpdates map[string]string,
+	isUniqueKeyModified bool,
+) (int, error) {
+	cfgAll, allRows, err := ParseFrontmatterAndContent(ctx, filePath, ContentModeAll)
+	if err != nil {
+		return 0, err
+	}
+
+	matched, err := SelectRowsStream(cfgAll.Headers, allRows, filters, posOpts)
+	if err != nil {
+		return 0, err
+	}
+	if len(matched) == 0 {
+		return 0, nil
+	}
+
+	targetSet := make(map[int]bool, len(matched))
+	for _, mr := range matched {
+		targetSet[mr.Index] = true
+	}
+
+	timestamp := time.Now().Format(timestampFormat)
+	type journalEntry struct {
+		rowKey  string
+		payload map[string]string
+	}
+	var journalEntries []journalEntry
+
+	seenBatchKeys := make(map[string]bool)
+
+	// Validate and apply updates
+	for idx, row := range allRows {
+		if targetSet[idx] {
+			newRow, mutated, err := ApplyRowUpdate(cfgAll.Headers, row, resolvedUpdates, cfgAll, timestamp)
+			if err != nil {
+				return 0, err
+			}
+
+			// Validate unique keys
+			if isUniqueKeyModified {
+				for _, uIdx := range cfgAll.UniqueIndices {
+					val := newRow[uIdx]
+					if strings.TrimSpace(val) == "" {
+						return 0, fmt.Errorf("unique column %q cannot be empty", cfgAll.Headers[uIdx])
+					}
+					if seenBatchKeys[val] {
+						return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in update batch", val, cfgAll.Headers[uIdx])
+					}
+					// Check collision against untouched rows
+					for otherIdx, otherRow := range allRows {
+						if !targetSet[otherIdx] && uIdx < len(otherRow) {
+							if otherRow[uIdx] == val {
+								return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfgAll.Headers[uIdx])
+							}
+						}
+					}
+					seenBatchKeys[val] = true
+				}
+			}
+
+			allRows[idx] = newRow
+
+			if cfgAll.JournalLog != "" {
+				rowMap := make(map[string]string, len(cfgAll.Headers))
+				for cIdx, h := range cfgAll.Headers {
+					if cIdx < len(newRow) {
+						rowMap[h] = newRow[cIdx]
+					}
+				}
+				rowKey := ComputeRowKey(cfgAll, idx+1, rowMap)
+				journalEntries = append(journalEntries, journalEntry{rowKey: rowKey, payload: mutated})
+			}
+		}
+	}
+
+	// Stable re-sort
+	if cfgAll.Sort != "" {
+		if err := SortRows(cfgAll.Headers, allRows, cfgAll.Sort); err != nil {
+			return 0, err
+		}
+	}
+
+	// Atomic disk serialization
+	if err := AtomicWriteTable(ctx, filePath, cfgAll, allRows); err != nil {
+		return 0, err
+	}
+
+	// Commit journal records
+	if cfgAll.JournalLog != "" {
+		for _, je := range journalEntries {
+			_ = WriteJournalRecord(ctx, cfgAll.JournalLog, "UPDATE", je.rowKey, je.payload)
+		}
+	}
+
+	return len(matched), nil
+}
+
+func streamUpdateWorkfile(
+	ctx context.Context,
+	filePath string,
+	cfg TableConfig,
+	filters []Filter,
+	posOpts PositionalOptions,
+	resolvedUpdates map[string]string,
+	isUniqueKeyModified bool,
+) (int, error) {
+	// Identify targeted row indices using streaming pushdown
+	_, matched, err := ScanAndSelect(ctx, filePath, filters, posOpts)
+	if err != nil {
+		return 0, err
+	}
+	if len(matched) == 0 {
+		return 0, nil
+	}
+
+	targetSet := make(map[int]bool, len(matched))
+	for _, mr := range matched {
+		targetSet[mr.Index] = true
+	}
+
+	// Locate table header line in the source file
+	_, _, headerLineNum, err := ScanTableHeaders(ctx, filePath)
+	if err != nil {
+		return 0, err
+	}
+
+	sourceFile, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer sourceFile.Close()
+
+	tempPath := filePath + ".tmp"
+	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		tempFile.Close()
+		_ = os.Remove(tempPath)
+	}()
+
+	writer := bufio.NewWriter(tempFile)
+	scanner := bufio.NewScanner(sourceFile)
+
+	timestamp := time.Now().Format(timestampFormat)
+	type journalEntry struct {
+		rowKey  string
+		payload map[string]string
+	}
+	var journalEntries []journalEntry
+
+	seenBatchKeys := make(map[string]bool)
+	seenUntouchedKeys := make(map[string]bool)
+
+	lineNum := 0
+	physicalRowIdx := 0
+	tableEnded := false
+	updatedCount := 0
+
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+
+		// 1. Pre-table lines (frontmatter, markdown headers, prose)
+		if lineNum < headerLineNum {
+			if _, err := writer.WriteString(line + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// 2. Table header and separator lines
+		if lineNum == headerLineNum {
+			if _, err := writer.WriteString(FormatGFMLine(cfg.Headers) + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if lineNum == headerLineNum+1 {
+			if _, err := writer.WriteString(FormatGFMLine(cfg.Alignments) + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// 3. Post-table lines (after table ends)
+		if tableEnded {
+			if _, err := writer.WriteString(line + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+		if !isTableRow(trimmed) {
+			tableEnded = true
+			if _, err := writer.WriteString(line + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// 4. Table data body row
+		cells, err := SplitGFMLine(line)
+		if err != nil {
+			// Write malformed line as-is
+			if _, err := writer.WriteString(line + "\n"); err != nil {
+				return 0, err
+			}
+			physicalRowIdx++
+			continue
+		}
+
+		if targetSet[physicalRowIdx] {
+			// Matched row: apply in-place mutations
+			newCells, mutated, err := ApplyRowUpdate(cfg.Headers, cells, resolvedUpdates, cfg, timestamp)
+			if err != nil {
+				return 0, err
+			}
+
+			// Validate unique key invariants
+			if isUniqueKeyModified {
+				for _, uIdx := range cfg.UniqueIndices {
+					if uIdx < len(newCells) {
+						val := newCells[uIdx]
+						if strings.TrimSpace(val) == "" {
+							return 0, fmt.Errorf("unique column %q cannot be empty", cfg.Headers[uIdx])
+						}
+						if seenBatchKeys[val] {
+							return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in update batch", val, cfg.Headers[uIdx])
+						}
+						if seenUntouchedKeys[val] {
+							return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
+						}
+						seenBatchKeys[val] = true
+					}
+				}
+			}
+
+			if _, err := writer.WriteString(FormatGFMLine(newCells) + "\n"); err != nil {
+				return 0, err
+			}
+
+			if cfg.JournalLog != "" {
+				rowMap := make(map[string]string, len(cfg.Headers))
+				for cIdx, h := range cfg.Headers {
+					if cIdx < len(newCells) {
+						rowMap[h] = newCells[cIdx]
+					}
+				}
+				rowKey := ComputeRowKey(cfg, physicalRowIdx+1, rowMap)
+				journalEntries = append(journalEntries, journalEntry{rowKey: rowKey, payload: mutated})
+			}
+
+			updatedCount++
+		} else {
+			// Untouched row: check against previously mutated batch keys
+			if isUniqueKeyModified {
+				for _, uIdx := range cfg.UniqueIndices {
+					if uIdx < len(cells) {
+						val := cells[uIdx]
+						if seenBatchKeys[val] {
+							return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
+						}
+						seenUntouchedKeys[val] = true
+					}
+				}
+			}
+
+			if _, err := writer.WriteString(FormatGFMLine(cells) + "\n"); err != nil {
+				return 0, err
+			}
+		}
+
+		physicalRowIdx++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	if err := writer.Flush(); err != nil {
+		return 0, err
+	}
+
+	// Close open file handles before atomic rename (critical on Windows)
+	tempFile.Close()
+	sourceFile.Close()
+
+	// Atomic swap
+	if err := os.Rename(tempPath, filePath); err != nil {
+		return 0, err
+	}
+
+	// Commit journal records
+	if cfg.JournalLog != "" {
+		for _, je := range journalEntries {
+			_ = WriteJournalRecord(ctx, cfg.JournalLog, "UPDATE", je.rowKey, je.payload)
+		}
+	}
+
+	return updatedCount, nil
+}

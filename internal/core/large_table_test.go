@@ -406,4 +406,56 @@ func TestLargeTable10k_PositionalQueries(t *testing.T) {
 	}
 }
 
+func TestLargeTable10k_StreamingUpdate(t *testing.T) {
+	origPath := get10kTablePath(t)
+	tmpDir := t.TempDir()
+	testPath := filepath.Join(tmpDir, "large_table_copy.md")
+
+	origBytes, err := os.ReadFile(origPath)
+	if err != nil {
+		t.Fatalf("failed to read 10k table: %v", err)
+	}
+	if err := os.WriteFile(testPath, origBytes, 0644); err != nil {
+		t.Fatalf("failed to copy 10k table: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Update first 10 matching 'in_progress' rows to 'verified'
+	headCount := 10
+	count, err := core.UpdateWithOptions(
+		ctx,
+		testPath,
+		[]string{"Status State == in_progress"},
+		core.PositionalOptions{Head: &headCount},
+		map[string]string{"Status State": "verified"},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("UpdateWithOptions failed: %v", err)
+	}
+	if count != 10 {
+		t.Errorf("expected 10 updated rows, got %d", count)
+	}
+
+	// Verify count of 'verified' status rows
+	verifiedCount, err := core.Count(ctx, testPath, []string{"Status State == verified"})
+	if err != nil {
+		t.Fatalf("Count verified failed: %v", err)
+	}
+	if verifiedCount != 10 {
+		t.Errorf("expected 10 verified rows, got %d", verifiedCount)
+	}
+
+	// Verify total row count is still 10,000
+	totalCount, err := core.Count(ctx, testPath, nil)
+	if err != nil {
+		t.Fatalf("Count total failed: %v", err)
+	}
+	if totalCount != 10000 {
+		t.Errorf("expected total count 10,000, got %d", totalCount)
+	}
+}
+
+
 

@@ -110,6 +110,7 @@ rowlite mcp-setup --client copilot
 - `rowlite list <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--format json|csv|tsv|md|pretty] [--include-row-number] [--include-metadata]` - Query, filter, and slice rows.
 - `rowlite count <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L]` - Count queried, filtered, or sliced rows.
 - `rowlite append <file> --row '{"col1": "val1"}' [--if-match "<etag>" | --if-checksum "<etag>" | --checksum "<etag>"]` - Append a row, applying validations and optional OCC precondition. Use JSON or CSV.
+- `rowlite update <file> [--where "..."] [--set "col=val"] [--data '{"col":"val"}'] [--index "..."] [--head N] [--tail N] [--if-match "<etag>"]` - Update matching rows in-place (supports pre-state isolation, auto-audit stamping, and OCC).
 - `rowlite dedupe <file> --column <name>` - Purge duplicate records in place.
 - `rowlite sort <file> --by "column:order,..."` - Sort the table. Useful for one-time sort or trigger the sorting from now-on.
 
@@ -183,6 +184,8 @@ Built in Go for speed, low memory overhead, and zero external dependencies. Benc
 | Text Search (`like`) | **~16.5 ms** |
 | Row Slicing & Ranges (`--index`) | **~17.7 ms** |
 | Sort Table | **~32.0 ms** |
+| Streaming Update (`--head 10`) | **~44.8 ms** |
+| In-Memory Row Mutation | **~362 ns** |
 
 > For in-memory caching benchmarks, memory metrics, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
 

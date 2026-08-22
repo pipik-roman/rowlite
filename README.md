@@ -1,6 +1,6 @@
 # Rowlite
 
-Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, append (update, delete coming soon!).
+Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, append, update (delete coming soon!).
 Instead of writing SQL queries or ad-hoc scripts, developers and AI agents interact with tabular data using simple, declarative actions (`list`, `append`, `update`, `delete`, `dedupe`) directly over columns.
 
 ## Why I created rowlite
@@ -190,22 +190,13 @@ Built in Go for speed, low memory overhead, and zero external dependencies. Benc
 > For in-memory caching benchmarks, memory metrics, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Roadmap
-Currently (2026-08-01) rowlite supports only bare minimum - append operation, simple query, count. Ideally markdown with table only.
+Currently rowlite supports table initialization, querying/filtering, slicing, appending, and in-place updating.
 
-Other features/improvements coming soon:
-- auto increment column (next release)
-- update row/cell (next release)
-- journalling changes (next release)
-- MCP table metadata caching (next release)
-- positional selection / filtering by row index (next release)
-- delete row (future release)
-- releases to MCP directories (future release)
-- insert (future release)
-- views (auto-updated filtered copy of original table) (future release)
-
-Other planned improvements:
-
-
+Planned features for future releases:
+- Delete row (`delete`)
+- Insert row at index (`insert`)
+- Views (auto-updated filtered copy of original table)
+- Official package distributions and package registries
 
 ## Tech Stack
 - Built in **Go** (for performance).

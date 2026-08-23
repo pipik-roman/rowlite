@@ -391,10 +391,10 @@ func NewListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&formatFlag, "format", "o", "auto", "Output format (auto, json, csv, tsv, md, pretty)")
 	cmd.Flags().IntVarP(&headFlag, "head", "H", 0, "Extract first N logical data rows from table start")
 	cmd.Flags().IntVarP(&tailFlag, "tail", "T", 0, "Extract last N logical data rows from table end")
-	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target logical row index, list (0,2,4), range (2..10, 2:10), or stepped slice (0..20..2)")
+	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target 0-based logical row index, list (0,2,4), range (2..10, 2:10), or stepped slice (0..20..2)")
 	cmd.Flags().IntVar(&offsetFlag, "offset", 0, "Zero-based row offset for pagination")
 	cmd.Flags().IntVarP(&limitFlag, "limit", "l", 0, "Maximum number of rows to return")
-	cmd.Flags().BoolVar(&includeRowNumberFlag, "include-row-number", false, "Inject row index (__row_index__ / #) into output")
+	cmd.Flags().BoolVar(&includeRowNumberFlag, "include-row-number", false, "Inject 0-based row index (__row_index__ / #) into output")
 	cmd.Flags().BoolVarP(&includeMetadataFlag, "include-metadata", "m", false, "Include ETag and summary metadata in output")
 
 	return cmd

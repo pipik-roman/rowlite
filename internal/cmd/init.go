@@ -135,7 +135,7 @@ func NewInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&auditEditVal, auditEditFlag, "", "enable modification timestamp auditing with custom column name")
 	cmd.Flags().Lookup(auditEditFlag).NoOptDefVal = defaultAuditEdit
 	cmd.Flags().StringVar(&journalVal, journalLogFlag, "", "path to change journal log file (logs 4-column change history: timestamp, operation, row_key, details)")
-	cmd.Flags().StringVar(&autoincrementVal, autoincrementFlag, "", "auto-increment column and optional step (e.g. id:10 or id)")
+	cmd.Flags().StringVar(&autoincrementVal, autoincrementFlag, "", "auto-increment column and optional step (e.g. id:10 or id; generates 1-based sequential integer IDs)")
 
 	return cmd
 }

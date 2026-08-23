@@ -124,7 +124,7 @@ func NewMcpCmd() *cobra.Command {
 				AuditInsert   string   `json:"audit_insert,omitempty" jsonschema:"custom name for creation timestamp column"`
 				AuditEdit     string   `json:"audit_edit,omitempty" jsonschema:"custom name for modification timestamp column"`
 				JournalLog    string   `json:"journal_log,omitempty" jsonschema:"path to change journal log file"`
-				AutoIncrement string   `json:"autoincrement,omitempty" jsonschema:"auto-increment column and optional step (e.g. id:10 or id)"`
+				AutoIncrement string   `json:"autoincrement,omitempty" jsonschema:"auto-increment column and optional step (e.g. id:10 or id). Identifiers are 1-based sequential integers."`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_init",
@@ -211,10 +211,10 @@ func NewMcpCmd() *cobra.Command {
 				Where           []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
 				Head            *int     `json:"head,omitempty" jsonschema:"extract the first N logical data rows from table start"`
 				Tail            *int     `json:"tail,omitempty" jsonschema:"extract the last N logical data rows from table end"`
-				Index           any      `json:"index,omitempty" jsonschema:"target row index (e.g. 0, -1), list ([0,2,4]), range ('2..10', '2:10'), or stepped slice ('0..20..2')"`
+				Index           any      `json:"index,omitempty" jsonschema:"target 0-based row index (e.g. 0, -1), list ([0,2,4]), range ('2..10', '2:10'), or stepped slice ('0..20..2')"`
 				Offset          int      `json:"offset,omitempty" jsonschema:"zero-based row offset for pagination"`
 				Limit           *int     `json:"limit,omitempty" jsonschema:"maximum number of rows to return"`
-				IncludeMetadata bool     `json:"include_metadata,omitempty" jsonschema:"when true, returns structured JSON metadata envelope with __row_index__, indices, total rows, and schema"`
+				IncludeMetadata bool     `json:"include_metadata,omitempty" jsonschema:"when true, returns structured JSON metadata envelope with 0-based __row_index__, indices, total rows, and schema"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_list",
@@ -312,7 +312,7 @@ func NewMcpCmd() *cobra.Command {
 				Where  []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['Priority == High', 'tags like beach'])"`
 				Head   *int     `json:"head,omitempty" jsonschema:"count bounded to first N rows"`
 				Tail   *int     `json:"tail,omitempty" jsonschema:"count bounded to last N rows"`
-				Index  any      `json:"index,omitempty" jsonschema:"target row index, list, range, or stepped slice"`
+				Index  any      `json:"index,omitempty" jsonschema:"target 0-based row index, list, range, or stepped slice"`
 				Offset int      `json:"offset,omitempty" jsonschema:"zero-based row offset for pagination"`
 				Limit  *int     `json:"limit,omitempty" jsonschema:"maximum count limit"`
 			}
@@ -387,7 +387,7 @@ func NewMcpCmd() *cobra.Command {
 				Where      []string          `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['status == Pending', 'priority like high'])"`
 				Head       *int              `json:"head,omitempty" jsonschema:"target first N matching rows"`
 				Tail       *int              `json:"tail,omitempty" jsonschema:"target last N matching rows"`
-				Index      any               `json:"index,omitempty" jsonschema:"target row index (e.g. 0, -1), list ([0,2,4]), range ('2..10'), or stepped slice ('0..20..2')"`
+				Index      any               `json:"index,omitempty" jsonschema:"target 0-based row index (e.g. 0, -1), list ([0,2,4]), range ('2..10'), or stepped slice ('0..20..2')"`
 				Offset     int               `json:"offset,omitempty" jsonschema:"zero-based offset for pagination"`
 				Limit      *int              `json:"limit,omitempty" jsonschema:"maximum number of rows to update"`
 				Set        map[string]string `json:"set" jsonschema:"key-value map of column names to updated cell values"`

@@ -128,15 +128,20 @@ Filter rows based on column values. Column names are matched flexibly (e.g. `ITE
   * `like` : Case-insensitive text search.
   * `regex` : Regular expression match.
 
-#### 2. Selecting Rows by Position
-Target rows by line position or paginate through large datasets:
+#### 2. Selecting Rows by Position (0-Based Indexing)
+Target rows by line position or paginate through large datasets using **0-based indexing** (matching standard programming language array slicing like `table[0]` and Python `.iloc`):
 
-* `--head <N>`, `-H <N>` : Get the first $N$ rows.
+* `--head <N>`, `-H <N>` : Get the first $N$ rows ($0 \dots N-1$).
 * `--tail <N>`, `-T <N>` : Get the last $N$ rows.
-* `--index <spec>`, `-i <spec>` : Target specific rows (`0`), lists (`"0,2,4"`), ranges (`"2..10"`), or stepped slices (`"0..20..2"`). Negative numbers count from the end (e.g. `"-1"` is the last row).
-* `--offset <O>` & `--limit <L>` : Skip $O$ rows and take up to $L$ rows.
-* `--include-row-number` : Include row numbers (`#` column or `__row_index__` in JSON) in the output.
+* `--index <spec>`, `-i <spec>` : Target specific 0-based rows (`0` for first row), lists (`"0,2,4"`), ranges (`"2..10"`), or stepped slices (`"0..20..2"`). Negative numbers count from the end (e.g. `"-1"` is the last row).
+* `--offset <O>` & `--limit <L>` : Skip $O$ rows (0-based) and take up to $L$ rows.
+* `--include-row-number` : Include 0-based row numbers (`#` column or `__row_index__` in JSON) in the output.
 * `--include-metadata`, `-m` : Include table ETag checksum and row totals in output.
+
+> [!NOTE]
+> **0-Based Slicing vs. 1-Based Auto-Increment IDs**:
+> Positional parameters (`--index`, `--offset`, `--head`, `--tail`, `#`) are strictly **0-based** to align with programming memory offsets and array operations.
+> In contrast, auto-increment surrogate keys (`autoincrement: "id:1"`) are **1-based** ($1, 2, 3, \dots$) to adhere to relational database primary key standards (like SQLite ROWID and MySQL AUTO_INCREMENT) and provide immutable entity identity across row mutations.
 
 #### 3. Optimistic Concurrency Control (`--if-match` / `--if-checksum` / `--checksum`)
 When multiple human users or AI agents interact with the same table, race conditions can cause lost updates or sequence conflicts. Rowlite computes a canonical SHA-256 ETag checksum over the table to guarantee state continuity:

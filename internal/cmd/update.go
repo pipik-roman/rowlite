@@ -109,7 +109,7 @@ func NewUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&dataFlag, "data", "d", "", "JSON or key=val update string (e.g. '{\"status\":\"Done\"}')")
 	cmd.Flags().IntVarP(&headFlag, "head", "H", 0, "Update only first N matching rows")
 	cmd.Flags().IntVarP(&tailFlag, "tail", "T", 0, "Update only last N matching rows")
-	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target row index (e.g. 0, -1), list (0,2,4), range (2..10), or stepped slice (0..20..2)")
+	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target 0-based row index (e.g. 0, -1), list (0,2,4), range (2..10), or stepped slice (0..20..2)")
 	cmd.Flags().IntVar(&offsetFlag, "offset", 0, "Zero-based row offset for pagination")
 	cmd.Flags().IntVarP(&limitFlag, "limit", "l", 0, "Maximum number of matching rows to update")
 	cmd.Flags().StringVar(&ifMatchFlag, "if-match", "", "Precondition table checksum (ETag) for optimistic concurrency control")

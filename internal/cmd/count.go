@@ -53,7 +53,7 @@ func NewCountCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&whereFlags, whereFlagName, nil, "WHERE conditions (supported operators: ==, !=, like, regex)")
 	cmd.Flags().IntVarP(&headFlag, "head", "H", 0, "Count bounded to first N rows")
 	cmd.Flags().IntVarP(&tailFlag, "tail", "T", 0, "Count bounded to last N rows")
-	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target logical row index, list (0,2,4), range (2..10, 2:10), or stepped slice (0..20..2)")
+	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target 0-based logical row index, list (0,2,4), range (2..10, 2:10), or stepped slice (0..20..2)")
 	cmd.Flags().IntVar(&offsetFlag, "offset", 0, "Zero-based row offset for pagination")
 	cmd.Flags().IntVarP(&limitFlag, "limit", "l", 0, "Maximum count limit")
 

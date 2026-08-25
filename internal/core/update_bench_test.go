@@ -28,7 +28,7 @@ func BenchmarkLargeTable10k_EndToEnd_Update_Streaming_Head10(b *testing.B) {
 		_ = os.WriteFile(testPath, origBytes, 0644)
 		b.StartTimer()
 
-		count, err := core.UpdateWithOptions(ctx, testPath, []string{"Status State == in_progress"}, posOpts, updates, "")
+		count, err := core.UpdateWithOptions(ctx, testPath, []string{"Status State == in_progress"}, posOpts, updates, "", false, false)
 		if err != nil || count != 10 {
 			b.Fatalf("UpdateWithOptions failed: %v, count: %d", err, count)
 		}
@@ -53,7 +53,7 @@ func BenchmarkLargeTable10k_EndToEnd_Update_Streaming_SingleIndex(b *testing.B) 
 		_ = os.WriteFile(testPath, origBytes, 0644)
 		b.StartTimer()
 
-		count, err := core.UpdateWithOptions(ctx, testPath, nil, posOpts, updates, "")
+		count, err := core.UpdateWithOptions(ctx, testPath, nil, posOpts, updates, "", false, false)
 		if err != nil || count != 1 {
 			b.Fatalf("UpdateWithOptions failed: %v, count: %d", err, count)
 		}

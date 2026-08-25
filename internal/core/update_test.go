@@ -35,6 +35,8 @@ func TestUpdateBasicWhere(t *testing.T) {
 		PositionalOptions{},
 		map[string]string{"status": "Active"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -71,6 +73,8 @@ func TestUpdateMultiColumnWithSnapshotIsolation(t *testing.T) {
 		PositionalOptions{},
 		map[string]string{"score": "150", "prev_score": "100"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -105,6 +109,8 @@ func TestUpdatePositionalSlicing(t *testing.T) {
 		PositionalOptions{Head: &h},
 		map[string]string{"status": "Processed"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -126,6 +132,8 @@ func TestUpdatePositionalSlicing(t *testing.T) {
 		PositionalOptions{Index: "-1"},
 		map[string]string{"status": "LastRow"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -160,6 +168,8 @@ rowlite:
 		PositionalOptions{},
 		map[string]string{"name": "Task A (Done)"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -198,6 +208,8 @@ rowlite:
 		PositionalOptions{},
 		map[string]string{"email": "alice@example.com"},
 		"",
+		false,
+		false,
 	)
 	if err == nil {
 		t.Fatalf("expected duplicate key error, got nil")
@@ -231,6 +243,8 @@ rowlite:
 		PositionalOptions{},
 		map[string]string{"code": "   "},
 		"",
+		false,
+		false,
 	)
 	if err == nil {
 		t.Fatalf("expected empty unique key error, got nil")
@@ -258,6 +272,8 @@ rowlite:
 		PositionalOptions{},
 		map[string]string{"priority": "5"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -300,6 +316,8 @@ rowlite:
 		PositionalOptions{},
 		map[string]string{"status": "Done"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -338,6 +356,8 @@ func TestUpdateOptimisticConcurrencyControl(t *testing.T) {
 		PositionalOptions{},
 		map[string]string{"status": "In Progress"},
 		etag,
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error on matching ETag: %v", err)
@@ -354,6 +374,8 @@ func TestUpdateOptimisticConcurrencyControl(t *testing.T) {
 		PositionalOptions{},
 		map[string]string{"status": "Closed"},
 		etag, // Old stale ETag
+		false,
+		false,
 	)
 	if err == nil {
 		t.Fatalf("expected precondition error on stale ETag, got nil")
@@ -361,6 +383,95 @@ func TestUpdateOptimisticConcurrencyControl(t *testing.T) {
 	var precondErr *PreconditionFailedError
 	if !errors.As(err, &precondErr) {
 		t.Errorf("expected PreconditionFailedError, got %T: %v", err, err)
+	}
+}
+
+func TestUpdateConditionlessRequiresAll(t *testing.T) {
+	content := `| id | status |
+| --- | --- |
+| 1 | Open |
+| 2 | Open |
+`
+	filePath := createTestTable(t, content)
+
+	// 1. Attempt conditionless update without allowAll -> should fail
+	_, err := UpdateWithOptions(
+		context.Background(),
+		filePath,
+		nil,
+		PositionalOptions{},
+		map[string]string{"status": "Closed"},
+		"",
+		false,
+		false,
+	)
+	if err == nil {
+		t.Fatalf("expected error for conditionless update without allowAll, got nil")
+	}
+	if !strings.Contains(err.Error(), "--all") {
+		t.Errorf("expected error message to mention '--all', got: %v", err)
+	}
+
+	// Verify table is untouched
+	_, rows, _ := ParseFrontmatterAndContent(context.Background(), filePath, ContentModeAll)
+	if rows[0][1] != "Open" || rows[1][1] != "Open" {
+		t.Errorf("table rows were modified despite error: %v", rows)
+	}
+
+	// 2. Conditionless update with allowAll=true -> should succeed
+	count, err := UpdateWithOptions(
+		context.Background(),
+		filePath,
+		nil,
+		PositionalOptions{},
+		map[string]string{"status": "Closed"},
+		"",
+		true,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error with allowAll=true: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 rows updated, got %d", count)
+	}
+
+	_, rows, _ = ParseFrontmatterAndContent(context.Background(), filePath, ContentModeAll)
+	if rows[0][1] != "Closed" || rows[1][1] != "Closed" {
+		t.Errorf("expected all rows to be updated to Closed: %v", rows)
+	}
+}
+
+func TestUpdateDryRun(t *testing.T) {
+	content := `| id | status |
+| --- | --- |
+| 1 | Open |
+| 2 | Open |
+| 3 | In Progress |
+`
+	filePath := createTestTable(t, content)
+
+	count, err := UpdateWithOptions(
+		context.Background(),
+		filePath,
+		[]string{"status == Open"},
+		PositionalOptions{},
+		map[string]string{"status": "Closed"},
+		"",
+		false,
+		true, // dryRun = true
+	)
+	if err != nil {
+		t.Fatalf("unexpected error during dry run: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected dry run count 2, got %d", count)
+	}
+
+	// Verify table on disk was NOT modified
+	_, rows, _ := ParseFrontmatterAndContent(context.Background(), filePath, ContentModeAll)
+	if rows[0][1] != "Open" || rows[1][1] != "Open" {
+		t.Errorf("table was modified during dry run: %v", rows)
 	}
 }
 

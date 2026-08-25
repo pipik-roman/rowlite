@@ -393,6 +393,8 @@ func NewMcpCmd() *cobra.Command {
 				Set        map[string]string `json:"set" jsonschema:"key-value map of column names to updated cell values"`
 				IfMatch    string            `json:"if_match,omitempty" jsonschema:"expected ETag checksum of the table before updating (for optimistic concurrency control)"`
 				IfChecksum string            `json:"if_checksum,omitempty" jsonschema:"alias for if_match (expected table checksum)"`
+				All        bool              `json:"all,omitempty" jsonschema:"set to true to confirm updating all rows if no where filter or positional selector is specified"`
+				DryRun     bool              `json:"dry_run,omitempty" jsonschema:"when true, returns count of rows that would be updated without modifying the file"`
 			}
 			mcp.AddTool(server, &mcp.Tool{
 				Name:        "rowlite_update",
@@ -411,7 +413,7 @@ func NewMcpCmd() *cobra.Command {
 					Limit:  args.Limit,
 				}
 
-				count, err := core.UpdateWithOptions(ctx, args.File, args.Where, posOpts, args.Set, expectedHash)
+				count, err := core.UpdateWithOptions(ctx, args.File, args.Where, posOpts, args.Set, expectedHash, args.All, args.DryRun)
 				if err != nil {
 					var precondErr *core.PreconditionFailedError
 					if errors.As(err, &precondErr) {
@@ -431,6 +433,14 @@ func NewMcpCmd() *cobra.Command {
 						}, nil, nil
 					}
 					return nil, nil, err
+				}
+
+				if args.DryRun {
+					return &mcp.CallToolResult{
+						Content: []mcp.Content{
+							&mcp.TextContent{Text: fmt.Sprintf("Dry run: would update %d row(s)", count)},
+						},
+					}, nil, nil
 				}
 
 				cache.Invalidate(args.File)

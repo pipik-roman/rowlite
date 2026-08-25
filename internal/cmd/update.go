@@ -23,6 +23,8 @@ func NewUpdateCmd() *cobra.Command {
 	var ifMatchFlag string
 	var ifChecksumFlag string
 	var checksumFlag string
+	var allFlag bool
+	var dryRunFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "update <file> [data-string]",
@@ -94,9 +96,14 @@ func NewUpdateCmd() *cobra.Command {
 				}
 			}
 
-			count, err := core.UpdateWithOptions(cmd.Context(), filePath, whereFlags, posOpts, updates, expectedHash)
+			count, err := core.UpdateWithOptions(cmd.Context(), filePath, whereFlags, posOpts, updates, expectedHash, allFlag, dryRunFlag)
 			if err != nil {
 				return err
+			}
+
+			if dryRunFlag {
+				fmt.Fprintf(cmd.OutOrStdout(), "Dry run: would update %d row(s) in %s\n", count, filePath)
+				return nil
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Successfully updated %d row(s) in %s\n", count, filePath)
@@ -115,6 +122,8 @@ func NewUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&ifMatchFlag, "if-match", "", "Precondition table checksum (ETag) for optimistic concurrency control")
 	cmd.Flags().StringVar(&ifChecksumFlag, "if-checksum", "", "Alias for --if-match (precondition table checksum)")
 	cmd.Flags().StringVar(&checksumFlag, "checksum", "", "Alias for --if-match (precondition table checksum)")
+	cmd.Flags().BoolVar(&allFlag, "all", false, "Allow updating all rows when no filter or positional selector is provided")
+	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Preview the number of matching rows to update without modifying the file")
 
 	return cmd
 }

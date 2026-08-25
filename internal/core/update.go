@@ -131,6 +131,8 @@ func ApplyRowUpdate(
 }
 
 // UpdateWithOptions parses the table and updates matching rows applying WHERE filters, positional slicing, constraints, and OCC.
+// It requires allowAll to be true if neither WHERE filters nor positional options are specified.
+// If dryRun is true, it simulates the selection and returns the number of matching rows without modifying the file.
 func UpdateWithOptions(
 	ctx context.Context,
 	filePath string,
@@ -138,6 +140,8 @@ func UpdateWithOptions(
 	posOpts PositionalOptions,
 	updates map[string]string,
 	ifMatch string,
+	allowAll bool,
+	dryRun bool,
 ) (int, error) {
 	if len(updates) == 0 {
 		return 0, fmt.Errorf("no column assignments specified for update")
@@ -180,7 +184,21 @@ func UpdateWithOptions(
 		return 0, err
 	}
 
-	// Step 5: Check if any sort column is modified
+	// Step 5: Enforce conditionless safety guardrail
+	if len(filters) == 0 && posOpts.IsZero() && !allowAll {
+		return 0, fmt.Errorf("updating all rows in table requires explicit confirmation flag (--all)")
+	}
+
+	// Step 6: Fast-path for dry-run simulation
+	if dryRun {
+		_, matched, err := ScanAndSelect(ctx, filePath, filters, posOpts)
+		if err != nil {
+			return 0, err
+		}
+		return len(matched), nil
+	}
+
+	// Step 7: Check if any sort column is modified
 	isSortKeyModified := false
 	if cfg.IsSorted() {
 		for _, rule := range cfg.SortRules {
@@ -194,7 +212,7 @@ func UpdateWithOptions(
 		}
 	}
 
-	// Step 6: Check if any unique column is modified
+	// Step 8: Check if any unique column is modified
 	isUniqueKeyModified := false
 	for _, uIdx := range cfg.UniqueIndices {
 		if uIdx < len(headers) {

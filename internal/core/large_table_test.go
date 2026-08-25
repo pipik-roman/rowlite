@@ -430,6 +430,8 @@ func TestLargeTable10k_StreamingUpdate(t *testing.T) {
 		core.PositionalOptions{Head: &headCount},
 		map[string]string{"Status State": "verified"},
 		"",
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("UpdateWithOptions failed: %v", err)

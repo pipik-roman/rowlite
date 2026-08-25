@@ -1063,6 +1063,71 @@ func TestUpdateCmd_OCC(t *testing.T) {
 	}
 }
 
+func TestUpdateCmd_ConditionlessRequiresAll(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "tasks.md")
+	content := "| id | status |\n| --- | --- |\n| 1 | Pending |\n| 2 | Pending |\n"
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// 1. Conditionless update without --all -> fails
+	cmdNoAll := silenceCmd(cmd.NewUpdateCmd())
+	cmdNoAll.SetArgs([]string{dbPath, "--set", "status=Done"})
+	err := cmdNoAll.Execute()
+	if err == nil {
+		t.Fatalf("expected update without --all to fail, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "--all") {
+		t.Errorf("expected error message to mention '--all', got: %v", err)
+	}
+
+	// 2. Conditionless update with --all -> succeeds
+	cmdWithAll := silenceCmd(cmd.NewUpdateCmd())
+	var out bytes.Buffer
+	cmdWithAll.SetOut(&out)
+	cmdWithAll.SetArgs([]string{dbPath, "--set", "status=Done", "--all"})
+	if err := cmdWithAll.Execute(); err != nil {
+		t.Fatalf("update with --all failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "Successfully updated 2 row(s)") {
+		t.Errorf("unexpected output: %s", out.String())
+	}
+}
+
+func TestUpdateCmd_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "tasks.md")
+	content := "| id | status |\n| --- | --- |\n| 1 | Pending |\n| 2 | Active |\n"
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// Run with --dry-run
+	dryCmd := silenceCmd(cmd.NewUpdateCmd())
+	var out bytes.Buffer
+	dryCmd.SetOut(&out)
+	dryCmd.SetArgs([]string{dbPath, "--where", "status == Pending", "--set", "status=Done", "--dry-run"})
+	if err := dryCmd.Execute(); err != nil {
+		t.Fatalf("update with --dry-run failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "Dry run: would update 1 row(s)") {
+		t.Errorf("expected dry run message, got: %s", out.String())
+	}
+
+	// Verify file was NOT modified
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var listBuf bytes.Buffer
+	listCmd.SetOut(&listBuf)
+	listCmd.SetArgs([]string{dbPath, "--where", "status == Pending"})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	if !strings.Contains(listBuf.String(), "Pending") {
+		t.Errorf("expected row to remain Pending, got: %s", listBuf.String())
+	}
+}
+
 
 
 

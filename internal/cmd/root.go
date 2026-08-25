@@ -35,6 +35,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(NewCountCmd())
 	cmd.AddCommand(NewAppendCmd())
 	cmd.AddCommand(NewUpdateCmd())
+	cmd.AddCommand(NewDeleteCmd())
 	cmd.AddCommand(NewSortCmd())
 	cmd.AddCommand(NewStructureCmd())
 	cmd.AddCommand(NewMcpCmd())

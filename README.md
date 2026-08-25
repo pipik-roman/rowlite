@@ -1,6 +1,6 @@
 # Rowlite
 
-Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, append, update (delete coming soon!).
+Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, append, update, and delete.
 Instead of writing SQL queries or ad-hoc scripts, developers and AI agents interact with tabular data using simple, declarative actions (`list`, `append`, `update`, `delete`, `dedupe`) directly over columns.
 
 ## Why I created rowlite
@@ -110,7 +110,8 @@ rowlite mcp-setup --client copilot
 - `rowlite list <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--format json|csv|tsv|md|pretty] [--include-row-number] [--include-metadata]` - Query, filter, and slice rows.
 - `rowlite count <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L]` - Count queried, filtered, or sliced rows.
 - `rowlite append <file> --row '{"col1": "val1"}' [--if-match "<etag>" | --if-checksum "<etag>" | --checksum "<etag>"]` - Append a row, applying validations and optional OCC precondition. Use JSON or CSV.
-- `rowlite update <file> [--where "..."] [--set "col=val"] [--data '{"col":"val"}'] [--index "..."] [--head N] [--tail N] [--if-match "<etag>"]` - Update matching rows in-place (supports pre-state isolation, auto-audit stamping, and OCC).
+- `rowlite update <file> [--where "..."] [--set "col=val"] [--data '{"col":"val"}'] [--index "..."] [--head N] [--tail N] [--all] [--dry-run] [--if-match "<etag>"]` - Update matching rows in-place (supports pre-state isolation, auto-audit stamping, OCC, and `--all` conditionless safety).
+- `rowlite delete <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--all] [--dry-run] [--if-match "<etag>"]` - Delete matching rows from table (supports WHERE filters, positional slicing, change journaling, dry-run, OCC, and `--all` conditionless safety).
 - `rowlite dedupe <file> --column <name>` - Purge duplicate records in place.
 - `rowlite sort <file> --by "column:order,..."` - Sort the table. Useful for one-time sort or trigger the sorting from now-on.
 
@@ -142,6 +143,8 @@ Target rows by line position or paginate through large datasets using **0-based 
 > **0-Based Slicing vs. 1-Based Auto-Increment IDs**:
 > Positional parameters (`--index`, `--offset`, `--head`, `--tail`, `#`) are strictly **0-based** to align with programming memory offsets and array operations.
 > In contrast, auto-increment surrogate keys (`autoincrement: "id:1"`) are **1-based** ($1, 2, 3, \dots$) to adhere to relational database primary key standards (like SQLite ROWID and MySQL AUTO_INCREMENT) and provide immutable entity identity across row mutations.
+> 
+> When rows are deleted, auto-increment surrogate keys continue monotonically calculating against the maximum remaining ID on subsequent appends—they do not re-number, decrement, or recycle IDs, ensuring stable entity references across deletions.
 
 #### 3. Optimistic Concurrency Control (`--if-match` / `--if-checksum` / `--checksum`)
 When multiple human users or AI agents interact with the same table, race conditions can cause lost updates or sequence conflicts. Rowlite computes a canonical SHA-256 ETag checksum over the table to guarantee state continuity:
@@ -174,6 +177,10 @@ rowlite count tasks.md --where "status == active" --head 10
 
 # 5. Extract even-numbered rows across the table
 rowlite list tasks.md --index "0..50..2"
+
+# 6. Delete completed tasks safely with dry-run preview first
+rowlite delete tasks.md --where "status == done" --dry-run
+rowlite delete tasks.md --where "status == done"
 ```
 
 ## ⚡ Performance
@@ -190,15 +197,15 @@ Built in Go for speed, low memory overhead, and zero external dependencies. Benc
 | Row Slicing & Ranges (`--index`) | **~17.7 ms** |
 | Sort Table | **~32.0 ms** |
 | Streaming Update (`--head 10`) | **~44.8 ms** |
+| Streaming Delete (`--head 10`) | **~41.2 ms** |
 | In-Memory Row Mutation | **~362 ns** |
 
 > For in-memory caching benchmarks, memory metrics, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Roadmap
-Currently rowlite supports table initialization, querying/filtering, slicing, appending, and in-place updating.
+Currently rowlite supports table initialization, querying/filtering, slicing, appending, in-place updating, and row deletion.
 
 Planned features for future releases:
-- Delete row (`delete`)
 - Insert row at index (`insert`)
 - Views (auto-updated filtered copy of original table)
 - Official package distributions and package registries

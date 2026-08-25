@@ -1128,6 +1128,189 @@ func TestUpdateCmd_DryRun(t *testing.T) {
 	}
 }
 
+func TestDeleteCmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "tasks.md")
+
+	content := `| id | title | status |
+| --- | --- | --- |
+| 1 | Task 1 | Pending |
+| 2 | Task 2 | Completed |
+| 3 | Task 3 | Pending |
+`
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// 1. Delete matching --where
+	delCmd := silenceCmd(cmd.NewDeleteCmd())
+	var delBuf bytes.Buffer
+	delCmd.SetOut(&delBuf)
+	delCmd.SetArgs([]string{dbPath, "--where", "status == Pending"})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete with --where failed: %v", err)
+	}
+	if !strings.Contains(delBuf.String(), "Successfully deleted 2 row(s)") {
+		t.Errorf("unexpected output: %s", delBuf.String())
+	}
+
+	// 2. Verify remaining rows
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var listBuf bytes.Buffer
+	listCmd.SetOut(&listBuf)
+	listCmd.SetArgs([]string{dbPath})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	listOut := listBuf.String()
+	if !strings.Contains(listOut, "Task 2") || strings.Contains(listOut, "Task 1") || strings.Contains(listOut, "Task 3") {
+		t.Errorf("unexpected remaining rows in list: %s", listOut)
+	}
+}
+
+func TestDeleteCmd_PositionalSlicing(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "items.md")
+	content := "| id | name |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n| 3 | C |\n| 4 | D |\n"
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// Delete head 2
+	delCmd := silenceCmd(cmd.NewDeleteCmd())
+	var delBuf bytes.Buffer
+	delCmd.SetOut(&delBuf)
+	delCmd.SetArgs([]string{dbPath, "--head", "2"})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete head failed: %v", err)
+	}
+	if !strings.Contains(delBuf.String(), "Successfully deleted 2 row(s)") {
+		t.Errorf("unexpected output: %s", delBuf.String())
+	}
+
+	// Verify remaining rows (C and D)
+	listCmd := silenceCmd(cmd.NewListCmd())
+	var listBuf bytes.Buffer
+	listCmd.SetOut(&listBuf)
+	listCmd.SetArgs([]string{dbPath})
+	if err := listCmd.Execute(); err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	out := listBuf.String()
+	if strings.Contains(out, "A") || strings.Contains(out, "B") || !strings.Contains(out, "C") || !strings.Contains(out, "D") {
+		t.Errorf("unexpected list output: %s", out)
+	}
+}
+
+func TestDeleteCmd_ConditionlessRequiresAll(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "items.md")
+	content := "| id | name |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n"
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// 1. Delete without flags -> fails
+	delCmd := silenceCmd(cmd.NewDeleteCmd())
+	delCmd.SetArgs([]string{dbPath})
+	err := delCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected delete without --all to fail, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "--all") {
+		t.Errorf("expected error to mention '--all', got: %v", err)
+	}
+
+	// 2. Delete with --all -> succeeds
+	delCmd2 := silenceCmd(cmd.NewDeleteCmd())
+	var delBuf bytes.Buffer
+	delCmd2.SetOut(&delBuf)
+	delCmd2.SetArgs([]string{dbPath, "--all"})
+	if err := delCmd2.Execute(); err != nil {
+		t.Fatalf("delete with --all failed: %v", err)
+	}
+	if !strings.Contains(delBuf.String(), "Successfully deleted 2 row(s)") {
+		t.Errorf("unexpected output: %s", delBuf.String())
+	}
+}
+
+func TestDeleteCmd_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "items.md")
+	content := "| id | name |\n| --- | --- |\n| 1 | A |\n| 2 | B |\n"
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	dryCmd := silenceCmd(cmd.NewDeleteCmd())
+	var out bytes.Buffer
+	dryCmd.SetOut(&out)
+	dryCmd.SetArgs([]string{dbPath, "--where", "name == A", "--dry-run"})
+	if err := dryCmd.Execute(); err != nil {
+		t.Fatalf("delete dry-run failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "Dry run: would delete 1 row(s)") {
+		t.Errorf("unexpected dry run output: %s", out.String())
+	}
+
+	// Verify table still has 2 rows
+	countCmd := silenceCmd(cmd.NewCountCmd())
+	var countBuf bytes.Buffer
+	countCmd.SetOut(&countBuf)
+	countCmd.SetArgs([]string{dbPath})
+	if err := countCmd.Execute(); err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if strings.TrimSpace(countBuf.String()) != "2" {
+		t.Errorf("expected count 2, got %s", countBuf.String())
+	}
+}
+
+func TestDeleteCmd_OCC(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "items.md")
+	content := "| id | name |\n| --- | --- |\n| 1 | A |\n"
+	if err := os.WriteFile(dbPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	structCmd := silenceCmd(cmd.NewStructureCmd())
+	var structBuf bytes.Buffer
+	structCmd.SetOut(&structBuf)
+	structCmd.SetArgs([]string{dbPath})
+	if err := structCmd.Execute(); err != nil {
+		t.Fatalf("structure failed: %v", err)
+	}
+	var etag string
+	for _, line := range strings.Split(structBuf.String(), "\n") {
+		if strings.HasPrefix(line, "ETag: ") {
+			etag = strings.TrimSpace(strings.TrimPrefix(line, "ETag: "))
+			break
+		}
+	}
+
+	// 1. Success with valid ETag
+	delCmd := silenceCmd(cmd.NewDeleteCmd())
+	delCmd.SetArgs([]string{dbPath, "--where", "id == 1", "--if-match", etag})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete with valid ETag failed: %v", err)
+	}
+
+	// Recreate table
+	_ = os.WriteFile(dbPath, []byte(content), 0644)
+
+	// 2. Mismatch with stale ETag
+	delCmd2 := silenceCmd(cmd.NewDeleteCmd())
+	delCmd2.SetArgs([]string{dbPath, "--where", "id == 1", "--if-match", "stale_etag"})
+	err := delCmd2.Execute()
+	if err == nil {
+		t.Fatalf("expected delete with stale ETag to fail, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "precondition failed") {
+		t.Errorf("expected precondition failed error message, got: %v", err)
+	}
+}
+
 
 
 

@@ -452,6 +452,75 @@ func NewMcpCmd() *cobra.Command {
 				}, nil, nil
 			})
 
+			type DeleteRowsArgs struct {
+				File       string   `json:"file" jsonschema:"path to the markdown file"`
+				Where      []string `json:"where,omitempty" jsonschema:"list of WHERE conditions (e.g. ['status == Done', 'priority like low'])"`
+				Head       *int     `json:"head,omitempty" jsonschema:"target first N matching rows"`
+				Tail       *int     `json:"tail,omitempty" jsonschema:"target last N matching rows"`
+				Index      any      `json:"index,omitempty" jsonschema:"target 0-based row index (e.g. 0, -1), list ([0,2,4]), range ('2..10'), or stepped slice ('0..20..2')"`
+				Offset     int      `json:"offset,omitempty" jsonschema:"zero-based offset for pagination"`
+				Limit      *int     `json:"limit,omitempty" jsonschema:"maximum number of rows to delete"`
+				IfMatch    string   `json:"if_match,omitempty" jsonschema:"expected ETag checksum of the table before deleting (for optimistic concurrency control)"`
+				IfChecksum string   `json:"if_checksum,omitempty" jsonschema:"alias for if_match (expected table checksum)"`
+				All        bool     `json:"all,omitempty" jsonschema:"set to true to confirm deleting all rows if no where filter or positional selector is specified"`
+				DryRun     bool     `json:"dry_run,omitempty" jsonschema:"when true, returns count of rows that would be deleted without modifying the file"`
+			}
+			mcp.AddTool(server, &mcp.Tool{
+				Name:        "rowlite_delete",
+				Description: "Delete matching rows from a GFM table (supports WHERE filters, positional slicing, change journaling, dry-run, and optimistic concurrency control via if_match)",
+			}, func(ctx context.Context, req *mcp.CallToolRequest, args DeleteRowsArgs) (*mcp.CallToolResult, any, error) {
+				expectedHash := args.IfMatch
+				if expectedHash == "" {
+					expectedHash = args.IfChecksum
+				}
+
+				posOpts := core.PositionalOptions{
+					Head:   args.Head,
+					Tail:   args.Tail,
+					Index:  parseIndexArg(args.Index),
+					Offset: args.Offset,
+					Limit:  args.Limit,
+				}
+
+				count, err := core.DeleteWithOptions(ctx, args.File, args.Where, posOpts, expectedHash, args.All, args.DryRun)
+				if err != nil {
+					var precondErr *core.PreconditionFailedError
+					if errors.As(err, &precondErr) {
+						errPayload := map[string]any{
+							"status":        "error",
+							"error_code":    "PRECONDITION_FAILED",
+							"message":       fmt.Sprintf("Table content has changed since the provided ETag ('%s'). Current ETag is '%s'. Re-read table and retry.", precondErr.ExpectedETag, precondErr.CurrentETag),
+							"expected_etag": precondErr.ExpectedETag,
+							"current_etag":  precondErr.CurrentETag,
+						}
+						errBytes, _ := json.MarshalIndent(errPayload, "", "  ")
+						return &mcp.CallToolResult{
+							IsError: true,
+							Content: []mcp.Content{
+								&mcp.TextContent{Text: string(errBytes)},
+							},
+						}, nil, nil
+					}
+					return nil, nil, err
+				}
+
+				if args.DryRun {
+					return &mcp.CallToolResult{
+						Content: []mcp.Content{
+							&mcp.TextContent{Text: fmt.Sprintf("Dry run: would delete %d row(s)", count)},
+						},
+					}, nil, nil
+				}
+
+				cache.Invalidate(args.File)
+
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("Successfully deleted %d row(s)", count)},
+					},
+				}, nil, nil
+			})
+
 			type SortTableArgs struct {
 				File    string `json:"file" jsonschema:"path to the markdown file"`
 				By      string `json:"by,omitempty" jsonschema:"sorting rule (e.g. id:desc)"`

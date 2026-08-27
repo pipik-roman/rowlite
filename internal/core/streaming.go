@@ -14,6 +14,272 @@ import (
 	"github.com/adrg/frontmatter"
 )
 
+// RowActionType specifies the operation to perform on the table output stream.
+type RowActionType int
+
+const (
+	ActionKeep RowActionType = iota
+	ActionInsert
+	ActionUpdate
+	ActionDelete
+)
+
+// RowAction represents a single, self-contained row operation in the output stream.
+type RowAction struct {
+	Type           RowActionType
+	Cells          []string          // Mutated or inserted cell values (for ActionUpdate and ActionInsert)
+	JournalOp      string            // "APPEND", "INSERT", "UPDATE", "DELETE"
+	JournalPayload map[string]string // Audit/journal metadata
+}
+
+// RowTransformer is invoked for each table data row (physicalRowIdx >= 0, cells != nil),
+// and once at the table boundary (physicalRowIdx = totalExistingRows, cells = nil) for trailing inserts or appends.
+// It returns an ordered slice of actions executed sequentially in the output stream.
+type RowTransformer func(physicalRowIdx int, cells []string) ([]RowAction, error)
+
+// StreamTransformTable streams a GFM table file line-by-line into a temporary workfile,
+// validating table structure strictly, executing sequential actions via transformer, and atomically swapping the file.
+// It preserves all pre-table frontmatter/headers/prose and post-table content verbatim.
+func StreamTransformTable(
+	ctx context.Context,
+	filePath string,
+	cfg TableConfig,
+	transformer RowTransformer,
+) (affectedCount int, err error) {
+	_, _, headerLineNum, err := ScanTableHeaders(ctx, filePath)
+	if err != nil {
+		return 0, err
+	}
+
+	sourceFile, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer sourceFile.Close()
+
+	tempPath := filePath + ".tmp"
+	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		tempFile.Close()
+		_ = os.Remove(tempPath)
+	}()
+
+	writer := bufio.NewWriter(tempFile)
+	scanner := bufio.NewScanner(sourceFile)
+
+	type journalEntry struct {
+		op      string
+		rowKey  string
+		payload map[string]string
+	}
+	var journalEntries []journalEntry
+
+	lineNum := 0
+	physicalRowIdx := 0
+	tableEnded := false
+
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+
+		// 1. Pre-table lines (frontmatter, markdown headers, prose)
+		if lineNum < headerLineNum {
+			if _, err := writer.WriteString(line + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// 2. Table header and separator lines
+		if lineNum == headerLineNum {
+			if _, err := writer.WriteString(FormatGFMLine(cfg.Headers) + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if lineNum == headerLineNum+1 {
+			if _, err := writer.WriteString(FormatGFMLine(cfg.Alignments) + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// 3. Post-table lines (after table ends)
+		if tableEnded {
+			if _, err := writer.WriteString(line + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+		if !isTableRow(trimmed) {
+			tableEnded = true
+
+			// Trigger table boundary action (e.g. trailing inserts/appends) before writing post-table line
+			boundaryActions, err := transformer(physicalRowIdx, nil)
+			if err != nil {
+				return 0, err
+			}
+			for _, action := range boundaryActions {
+				if action.Type == ActionInsert {
+					if len(action.Cells) != len(cfg.Headers) {
+						return 0, fmt.Errorf("inconsistent column count in table tail insert: got %d columns, expected %d", len(action.Cells), len(cfg.Headers))
+					}
+					if _, err := writer.WriteString(FormatGFMLine(action.Cells) + "\n"); err != nil {
+						return 0, err
+					}
+					affectedCount++
+					if cfg.JournalLog != "" && action.JournalOp != "" {
+						fullMap := make(map[string]string, len(cfg.Headers))
+						for cIdx, h := range cfg.Headers {
+							if cIdx < len(action.Cells) {
+								fullMap[h] = action.Cells[cIdx]
+							}
+						}
+						rowKey := ComputeRowKey(cfg, physicalRowIdx+1, fullMap)
+						journalEntries = append(journalEntries, journalEntry{op: action.JournalOp, rowKey: rowKey, payload: action.JournalPayload})
+					}
+				}
+			}
+
+			if _, err := writer.WriteString(line + "\n"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// 4. Table data body row
+		cells, err := SplitGFMLine(line)
+		if err != nil {
+			return 0, fmt.Errorf("malformed table row at line %d: %w", lineNum, err)
+		}
+		if len(cells) != len(cfg.Headers) {
+			return 0, fmt.Errorf("inconsistent column count at line %d: row has %d columns, expected %d", lineNum, len(cells), len(cfg.Headers))
+		}
+
+		actions, err := transformer(physicalRowIdx, cells)
+		if err != nil {
+			return 0, err
+		}
+
+		for _, action := range actions {
+			switch action.Type {
+			case ActionKeep:
+				if _, err := writer.WriteString(FormatGFMLine(cells) + "\n"); err != nil {
+					return 0, err
+				}
+			case ActionUpdate:
+				if len(action.Cells) != len(cfg.Headers) {
+					return 0, fmt.Errorf("inconsistent column count in update at line %d: got %d columns, expected %d", lineNum, len(action.Cells), len(cfg.Headers))
+				}
+				if _, err := writer.WriteString(FormatGFMLine(action.Cells) + "\n"); err != nil {
+					return 0, err
+				}
+				affectedCount++
+				if cfg.JournalLog != "" && action.JournalOp != "" {
+					fullMap := make(map[string]string, len(cfg.Headers))
+					sourceCells := action.Cells
+					if len(sourceCells) == 0 {
+						sourceCells = cells
+					}
+					for cIdx, h := range cfg.Headers {
+						if cIdx < len(sourceCells) {
+							fullMap[h] = sourceCells[cIdx]
+						}
+					}
+					rowKey := ComputeRowKey(cfg, physicalRowIdx+1, fullMap)
+					journalEntries = append(journalEntries, journalEntry{op: action.JournalOp, rowKey: rowKey, payload: action.JournalPayload})
+				}
+			case ActionDelete:
+				affectedCount++
+				if cfg.JournalLog != "" && action.JournalOp != "" {
+					fullMap := make(map[string]string, len(cfg.Headers))
+					for cIdx, h := range cfg.Headers {
+						if cIdx < len(cells) {
+							fullMap[h] = cells[cIdx]
+						}
+					}
+					rowKey := ComputeRowKey(cfg, physicalRowIdx+1, fullMap)
+					journalEntries = append(journalEntries, journalEntry{op: action.JournalOp, rowKey: rowKey, payload: action.JournalPayload})
+				}
+			case ActionInsert:
+				if len(action.Cells) != len(cfg.Headers) {
+					return 0, fmt.Errorf("inconsistent column count in insert at line %d: got %d columns, expected %d", lineNum, len(action.Cells), len(cfg.Headers))
+				}
+				if _, err := writer.WriteString(FormatGFMLine(action.Cells) + "\n"); err != nil {
+					return 0, err
+				}
+				affectedCount++
+				if cfg.JournalLog != "" && action.JournalOp != "" {
+					fullMap := make(map[string]string, len(cfg.Headers))
+					for cIdx, h := range cfg.Headers {
+						if cIdx < len(action.Cells) {
+							fullMap[h] = action.Cells[cIdx]
+						}
+					}
+					rowKey := ComputeRowKey(cfg, physicalRowIdx+1, fullMap)
+					journalEntries = append(journalEntries, journalEntry{op: action.JournalOp, rowKey: rowKey, payload: action.JournalPayload})
+				}
+			}
+		}
+
+		physicalRowIdx++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	// If table went all the way to EOF without trailing non-table line, invoke boundary action now
+	if !tableEnded {
+		boundaryActions, err := transformer(physicalRowIdx, nil)
+		if err != nil {
+			return 0, err
+		}
+		for _, action := range boundaryActions {
+			if action.Type == ActionInsert {
+				if len(action.Cells) != len(cfg.Headers) {
+					return 0, fmt.Errorf("inconsistent column count in table tail insert: got %d columns, expected %d", len(action.Cells), len(cfg.Headers))
+				}
+				if _, err := writer.WriteString(FormatGFMLine(action.Cells) + "\n"); err != nil {
+					return 0, err
+				}
+				affectedCount++
+				if cfg.JournalLog != "" && action.JournalOp != "" {
+					rowKey := ComputeRowKey(cfg, physicalRowIdx+1, action.JournalPayload)
+					journalEntries = append(journalEntries, journalEntry{op: action.JournalOp, rowKey: rowKey, payload: action.JournalPayload})
+				}
+			}
+		}
+	}
+
+	if err := writer.Flush(); err != nil {
+		return 0, err
+	}
+
+	// Close open file handles before atomic rename (critical on Windows)
+	tempFile.Close()
+	sourceFile.Close()
+
+	// Atomic swap
+	if err := os.Rename(tempPath, filePath); err != nil {
+		return 0, err
+	}
+
+	// Commit journal records
+	if cfg.JournalLog != "" {
+		for _, je := range journalEntries {
+			_ = WriteJournalRecord(ctx, cfg.JournalLog, je.op, je.rowKey, je.payload)
+		}
+	}
+
+	return affectedCount, nil
+}
+
 // PushdownStrategy defines the streaming evaluation strategy for positional queries.
 type PushdownStrategy int
 
@@ -499,8 +765,10 @@ func ScanAndSelect(ctx context.Context, filePath string, filters []Filter, posOp
 
 		cells, err := SplitGFMLine(line)
 		if err != nil {
-			physicalRowIdx++
-			continue
+			return TableConfig{}, nil, fmt.Errorf("malformed table row: %w", err)
+		}
+		if len(cells) != len(headers) {
+			return TableConfig{}, nil, fmt.Errorf("inconsistent column count: row has %d columns, expected %d", len(cells), len(headers))
 		}
 
 		matched, err := MatchesRow(headers, cells, filters)

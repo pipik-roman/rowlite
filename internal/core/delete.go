@@ -1,11 +1,8 @@
 package core
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
-	"strings"
 )
 
 // DeleteWithOptions parses the table and deletes matching rows applying WHERE filters, positional slicing, and OCC.
@@ -52,7 +49,63 @@ func DeleteWithOptions(
 		return 0, fmt.Errorf("deleting all rows in table requires explicit confirmation flag (--all)")
 	}
 
-	// Step 5: Identify targeted row indices using streaming pushdown
+	// Step 5: Fast-path for dry-run simulation
+	if dryRun {
+		_, matched, err := ScanAndSelect(ctx, filePath, filters, posOpts)
+		if err != nil {
+			return 0, err
+		}
+		return len(matched), nil
+	}
+
+	// Step 6: Determine pushdown strategy (Single-Pass vs Two-Pass)
+	plan := PlanPushdown(posOpts)
+
+	// Single-Pass execution for forward queries (StrategyEarlyExit, StrategyAll)
+	if (plan.Strategy == StrategyEarlyExit || plan.Strategy == StrategyAll) && !plan.FallbackSlicing {
+		matchCount := 0
+		transformer := func(physicalRowIdx int, cells []string) ([]RowAction, error) {
+			if cells == nil {
+				return nil, nil // boundary event: nothing to append on delete
+			}
+
+			// If upper match bound was already reached in StrategyEarlyExit, skip predicate evaluations
+			if plan.Strategy == StrategyEarlyExit && matchCount >= plan.MaxMatches {
+				return []RowAction{{Type: ActionKeep}}, nil
+			}
+
+			matched, err := MatchesRow(cfg.Headers, cells, filters)
+			if err != nil {
+				return nil, err
+			}
+
+			if matched {
+				isTargeted := plan.MatchesTarget(matchCount)
+				matchCount++
+				if isTargeted {
+					rowMap := make(map[string]string, len(cfg.Headers))
+					for cIdx, h := range cfg.Headers {
+						if cIdx < len(cells) {
+							rowMap[h] = cells[cIdx]
+						}
+					}
+					return []RowAction{
+						{
+							Type:           ActionDelete,
+							JournalOp:      "DELETE",
+							JournalPayload: rowMap,
+						},
+					}, nil
+				}
+			}
+
+			return []RowAction{{Type: ActionKeep}}, nil
+		}
+
+		return StreamTransformTable(ctx, filePath, cfg, transformer)
+	}
+
+	// Two-Pass execution for backward queries (StrategyRingBuffer, StrategyDualPartition, FallbackSlicing)
 	_, matched, err := ScanAndSelect(ctx, filePath, filters, posOpts)
 	if err != nil {
 		return 0, err
@@ -61,162 +114,34 @@ func DeleteWithOptions(
 		return 0, nil
 	}
 
-	// Step 6: Fast-path for dry-run simulation
-	if dryRun {
-		return len(matched), nil
-	}
-
-	// Step 7: Stream deletion via workfile rewrite (O(1) memory overhead)
-	return streamDeleteWorkfile(ctx, filePath, cfg, matched)
-}
-
-func streamDeleteWorkfile(
-	ctx context.Context,
-	filePath string,
-	cfg TableConfig,
-	matched MatchedRows,
-) (int, error) {
 	targetSet := make(map[int]bool, len(matched))
 	for _, mr := range matched {
 		targetSet[mr.Index] = true
 	}
 
-	// Locate table header line in the source file
-	_, _, headerLineNum, err := ScanTableHeaders(ctx, filePath)
-	if err != nil {
-		return 0, err
-	}
-
-	sourceFile, err := os.Open(filePath)
-	if err != nil {
-		return 0, err
-	}
-	defer sourceFile.Close()
-
-	tempPath := filePath + ".tmp"
-	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
-		tempFile.Close()
-		_ = os.Remove(tempPath)
-	}()
-
-	writer := bufio.NewWriter(tempFile)
-	scanner := bufio.NewScanner(sourceFile)
-
-	type journalEntry struct {
-		rowKey  string
-		payload map[string]string
-	}
-	var journalEntries []journalEntry
-
-	lineNum := 0
-	physicalRowIdx := 0
-	tableEnded := false
-	deletedCount := 0
-
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-
-		// 1. Pre-table lines (frontmatter, markdown headers, prose)
-		if lineNum < headerLineNum {
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		// 2. Table header and separator lines
-		if lineNum == headerLineNum {
-			if _, err := writer.WriteString(FormatGFMLine(cfg.Headers) + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-		if lineNum == headerLineNum+1 {
-			if _, err := writer.WriteString(FormatGFMLine(cfg.Alignments) + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		// 3. Post-table lines (after table ends)
-		if tableEnded {
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		trimmed := strings.TrimSpace(line)
-		if !isTableRow(trimmed) {
-			tableEnded = true
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		// 4. Table data body row
-		cells, err := SplitGFMLine(line)
-		if err != nil {
-			// Write malformed line as-is
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			physicalRowIdx++
-			continue
+	transformer := func(physicalRowIdx int, cells []string) ([]RowAction, error) {
+		if cells == nil {
+			return nil, nil
 		}
 
 		if targetSet[physicalRowIdx] {
-			// Targeted row: exclude from output workfile
-			if cfg.JournalLog != "" {
-				rowMap := make(map[string]string, len(cfg.Headers))
-				for cIdx, h := range cfg.Headers {
-					if cIdx < len(cells) {
-						rowMap[h] = cells[cIdx]
-					}
+			rowMap := make(map[string]string, len(cfg.Headers))
+			for cIdx, h := range cfg.Headers {
+				if cIdx < len(cells) {
+					rowMap[h] = cells[cIdx]
 				}
-				rowKey := ComputeRowKey(cfg, physicalRowIdx+1, rowMap)
-				journalEntries = append(journalEntries, journalEntry{rowKey: rowKey, payload: rowMap})
 			}
-			deletedCount++
-		} else {
-			// Untouched row: write to workfile
-			if _, err := writer.WriteString(FormatGFMLine(cells) + "\n"); err != nil {
-				return 0, err
-			}
+			return []RowAction{
+				{
+					Type:           ActionDelete,
+					JournalOp:      "DELETE",
+					JournalPayload: rowMap,
+				},
+			}, nil
 		}
 
-		physicalRowIdx++
+		return []RowAction{{Type: ActionKeep}}, nil
 	}
 
-	if err := scanner.Err(); err != nil {
-		return 0, err
-	}
-
-	if err := writer.Flush(); err != nil {
-		return 0, err
-	}
-
-	// Close open file handles before atomic rename (critical on Windows)
-	tempFile.Close()
-	sourceFile.Close()
-
-	// Atomic swap
-	if err := os.Rename(tempPath, filePath); err != nil {
-		return 0, err
-	}
-
-	// Commit journal records
-	if cfg.JournalLog != "" {
-		for _, je := range journalEntries {
-			_ = WriteJournalRecord(ctx, cfg.JournalLog, "DELETE", je.rowKey, je.payload)
-		}
-	}
-
-	return deletedCount, nil
+	return StreamTransformTable(ctx, filePath, cfg, transformer)
 }

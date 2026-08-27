@@ -1,11 +1,9 @@
 package core
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 )
@@ -353,7 +351,98 @@ func streamUpdateWorkfile(
 	resolvedUpdates map[string]string,
 	isUniqueKeyModified bool,
 ) (int, error) {
-	// Identify targeted row indices using streaming pushdown
+	plan := PlanPushdown(posOpts)
+	timestamp := time.Now().Format(timestampFormat)
+	seenBatchKeys := make(map[string]bool)
+	seenUntouchedKeys := make(map[string]bool)
+
+	// Single-Pass execution for forward queries (StrategyEarlyExit, StrategyAll)
+	if (plan.Strategy == StrategyEarlyExit || plan.Strategy == StrategyAll) && !plan.FallbackSlicing {
+		matchCount := 0
+		transformer := func(physicalRowIdx int, cells []string) ([]RowAction, error) {
+			if cells == nil {
+				return nil, nil // boundary event
+			}
+
+			// If upper match bound was already reached in StrategyEarlyExit, skip predicate evaluations
+			if plan.Strategy == StrategyEarlyExit && matchCount >= plan.MaxMatches {
+				if isUniqueKeyModified {
+					for _, uIdx := range cfg.UniqueIndices {
+						if uIdx < len(cells) {
+							val := cells[uIdx]
+							if seenBatchKeys[val] {
+								return nil, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
+							}
+							seenUntouchedKeys[val] = true
+						}
+					}
+				}
+				return []RowAction{{Type: ActionKeep}}, nil
+			}
+
+			matched, err := MatchesRow(cfg.Headers, cells, filters)
+			if err != nil {
+				return nil, err
+			}
+
+			if matched {
+				isTargeted := plan.MatchesTarget(matchCount)
+				matchCount++
+				if isTargeted {
+					newCells, mutated, err := ApplyRowUpdate(cfg.Headers, cells, resolvedUpdates, cfg, timestamp)
+					if err != nil {
+						return nil, err
+					}
+
+					if isUniqueKeyModified {
+						for _, uIdx := range cfg.UniqueIndices {
+							if uIdx < len(newCells) {
+								val := newCells[uIdx]
+								if strings.TrimSpace(val) == "" {
+									return nil, fmt.Errorf("unique column %q cannot be empty", cfg.Headers[uIdx])
+								}
+								if seenBatchKeys[val] {
+									return nil, fmt.Errorf("duplicate key error: value %q for column %q already exists in update batch", val, cfg.Headers[uIdx])
+								}
+								if seenUntouchedKeys[val] {
+									return nil, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
+								}
+								seenBatchKeys[val] = true
+							}
+						}
+					}
+
+					return []RowAction{
+						{
+							Type:           ActionUpdate,
+							Cells:          newCells,
+							JournalOp:      "UPDATE",
+							JournalPayload: mutated,
+						},
+					}, nil
+				}
+			}
+
+			// Untouched row: check against previously mutated batch keys
+			if isUniqueKeyModified {
+				for _, uIdx := range cfg.UniqueIndices {
+					if uIdx < len(cells) {
+						val := cells[uIdx]
+						if seenBatchKeys[val] {
+							return nil, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
+						}
+						seenUntouchedKeys[val] = true
+					}
+				}
+			}
+
+			return []RowAction{{Type: ActionKeep}}, nil
+		}
+
+		return StreamTransformTable(ctx, filePath, cfg, transformer)
+	}
+
+	// Two-Pass execution for backward queries (StrategyRingBuffer, StrategyDualPartition, FallbackSlicing)
 	_, matched, err := ScanAndSelect(ctx, filePath, filters, posOpts)
 	if err != nil {
 		return 0, err
@@ -367,187 +456,59 @@ func streamUpdateWorkfile(
 		targetSet[mr.Index] = true
 	}
 
-	// Locate table header line in the source file
-	_, _, headerLineNum, err := ScanTableHeaders(ctx, filePath)
-	if err != nil {
-		return 0, err
-	}
-
-	sourceFile, err := os.Open(filePath)
-	if err != nil {
-		return 0, err
-	}
-	defer sourceFile.Close()
-
-	tempPath := filePath + ".tmp"
-	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
-		tempFile.Close()
-		_ = os.Remove(tempPath)
-	}()
-
-	writer := bufio.NewWriter(tempFile)
-	scanner := bufio.NewScanner(sourceFile)
-
-	timestamp := time.Now().Format(timestampFormat)
-	type journalEntry struct {
-		rowKey  string
-		payload map[string]string
-	}
-	var journalEntries []journalEntry
-
-	seenBatchKeys := make(map[string]bool)
-	seenUntouchedKeys := make(map[string]bool)
-
-	lineNum := 0
-	physicalRowIdx := 0
-	tableEnded := false
-	updatedCount := 0
-
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-
-		// 1. Pre-table lines (frontmatter, markdown headers, prose)
-		if lineNum < headerLineNum {
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		// 2. Table header and separator lines
-		if lineNum == headerLineNum {
-			if _, err := writer.WriteString(FormatGFMLine(cfg.Headers) + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-		if lineNum == headerLineNum+1 {
-			if _, err := writer.WriteString(FormatGFMLine(cfg.Alignments) + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		// 3. Post-table lines (after table ends)
-		if tableEnded {
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		trimmed := strings.TrimSpace(line)
-		if !isTableRow(trimmed) {
-			tableEnded = true
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			continue
-		}
-
-		// 4. Table data body row
-		cells, err := SplitGFMLine(line)
-		if err != nil {
-			// Write malformed line as-is
-			if _, err := writer.WriteString(line + "\n"); err != nil {
-				return 0, err
-			}
-			physicalRowIdx++
-			continue
+	transformer := func(physicalRowIdx int, cells []string) ([]RowAction, error) {
+		if cells == nil {
+			return nil, nil
 		}
 
 		if targetSet[physicalRowIdx] {
-			// Matched row: apply in-place mutations
 			newCells, mutated, err := ApplyRowUpdate(cfg.Headers, cells, resolvedUpdates, cfg, timestamp)
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 
-			// Validate unique key invariants
 			if isUniqueKeyModified {
 				for _, uIdx := range cfg.UniqueIndices {
 					if uIdx < len(newCells) {
 						val := newCells[uIdx]
 						if strings.TrimSpace(val) == "" {
-							return 0, fmt.Errorf("unique column %q cannot be empty", cfg.Headers[uIdx])
+							return nil, fmt.Errorf("unique column %q cannot be empty", cfg.Headers[uIdx])
 						}
 						if seenBatchKeys[val] {
-							return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in update batch", val, cfg.Headers[uIdx])
+							return nil, fmt.Errorf("duplicate key error: value %q for column %q already exists in update batch", val, cfg.Headers[uIdx])
 						}
 						if seenUntouchedKeys[val] {
-							return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
+							return nil, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
 						}
 						seenBatchKeys[val] = true
 					}
 				}
 			}
 
-			if _, err := writer.WriteString(FormatGFMLine(newCells) + "\n"); err != nil {
-				return 0, err
-			}
+			return []RowAction{
+				{
+					Type:           ActionUpdate,
+					Cells:          newCells,
+					JournalOp:      "UPDATE",
+					JournalPayload: mutated,
+				},
+			}, nil
+		}
 
-			if cfg.JournalLog != "" {
-				rowMap := make(map[string]string, len(cfg.Headers))
-				for cIdx, h := range cfg.Headers {
-					if cIdx < len(newCells) {
-						rowMap[h] = newCells[cIdx]
+		if isUniqueKeyModified {
+			for _, uIdx := range cfg.UniqueIndices {
+				if uIdx < len(cells) {
+					val := cells[uIdx]
+					if seenBatchKeys[val] {
+						return nil, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
 					}
+					seenUntouchedKeys[val] = true
 				}
-				rowKey := ComputeRowKey(cfg, physicalRowIdx+1, rowMap)
-				journalEntries = append(journalEntries, journalEntry{rowKey: rowKey, payload: mutated})
-			}
-
-			updatedCount++
-		} else {
-			// Untouched row: check against previously mutated batch keys
-			if isUniqueKeyModified {
-				for _, uIdx := range cfg.UniqueIndices {
-					if uIdx < len(cells) {
-						val := cells[uIdx]
-						if seenBatchKeys[val] {
-							return 0, fmt.Errorf("duplicate key error: value %q for column %q already exists in table", val, cfg.Headers[uIdx])
-						}
-						seenUntouchedKeys[val] = true
-					}
-				}
-			}
-
-			if _, err := writer.WriteString(FormatGFMLine(cells) + "\n"); err != nil {
-				return 0, err
 			}
 		}
 
-		physicalRowIdx++
+		return []RowAction{{Type: ActionKeep}}, nil
 	}
 
-	if err := scanner.Err(); err != nil {
-		return 0, err
-	}
-
-	if err := writer.Flush(); err != nil {
-		return 0, err
-	}
-
-	// Close open file handles before atomic rename (critical on Windows)
-	tempFile.Close()
-	sourceFile.Close()
-
-	// Atomic swap
-	if err := os.Rename(tempPath, filePath); err != nil {
-		return 0, err
-	}
-
-	// Commit journal records
-	if cfg.JournalLog != "" {
-		for _, je := range journalEntries {
-			_ = WriteJournalRecord(ctx, cfg.JournalLog, "UPDATE", je.rowKey, je.payload)
-		}
-	}
-
-	return updatedCount, nil
+	return StreamTransformTable(ctx, filePath, cfg, transformer)
 }

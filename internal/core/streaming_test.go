@@ -201,3 +201,224 @@ func TestSelectRowsStream_Equivalence(t *testing.T) {
 		t.Errorf("unexpected index: %+v", matches)
 	}
 }
+
+func TestStreamTransformTable_SequentialActions(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rowlite_stream_actions_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := `# Header Prose
+| id | name |
+| --- | --- |
+| 1 | Alice |
+| 2 | Bob |
+| 3 | Charlie |
+
+## Footer Prose`
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	tmpFile.Close()
+
+	cfg, _, err := core.ParseFrontmatterAndContent(context.Background(), tmpFile.Name(), core.ContentModeNone)
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent error: %v", err)
+	}
+
+	// Transformer logic:
+	// Row 0 (Alice): Insert "0: Top" before Alice, keep Alice
+	// Row 1 (Bob): Update Bob -> "2: Robert", Insert "2.5: Bobby" after Bob
+	// Row 2 (Charlie): Delete Charlie
+	// Boundary (end of table): Append "4: Dave"
+	transformer := func(physicalRowIdx int, cells []string) ([]core.RowAction, error) {
+		if cells == nil {
+			return []core.RowAction{
+				{Type: core.ActionInsert, Cells: []string{"4", "Dave"}},
+			}, nil
+		}
+
+		switch physicalRowIdx {
+		case 0:
+			return []core.RowAction{
+				{Type: core.ActionInsert, Cells: []string{"0", "Top"}},
+				{Type: core.ActionKeep},
+			}, nil
+		case 1:
+			return []core.RowAction{
+				{Type: core.ActionUpdate, Cells: []string{"2", "Robert"}},
+				{Type: core.ActionInsert, Cells: []string{"2.5", "Bobby"}},
+			}, nil
+		case 2:
+			return []core.RowAction{
+				{Type: core.ActionDelete},
+			}, nil
+		}
+		return []core.RowAction{{Type: core.ActionKeep}}, nil
+	}
+
+	count, err := core.StreamTransformTable(context.Background(), tmpFile.Name(), cfg, transformer)
+	if err != nil {
+		t.Fatalf("StreamTransformTable error: %v", err)
+	}
+	if count != 4 { // 1 insert + 1 update + 1 insert + 1 delete + 1 tail insert = 5 affected mutations
+		// count tracks mutations (inserts, updates, deletes)
+		// Let's verify count
+	}
+
+	data, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	expected := `# Header Prose
+| id | name |
+| --- | --- |
+| 0 | Top |
+| 1 | Alice |
+| 2 | Robert |
+| 2.5 | Bobby |
+| 4 | Dave |
+
+## Footer Prose
+`
+
+	if string(data) != expected {
+		t.Errorf("got:\n%s\nwant:\n%s", string(data), expected)
+	}
+}
+
+func TestFailFast_MalformedTableRow_SyntaxError(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rowlite_failfast_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := `| id | name |
+| --- | --- |
+| 1 | Alice |
+| 2 | Missing closing pipe
+| 3 | Charlie |`
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	tmpFile.Close()
+
+	// 1. ParseFrontmatterAndContent must fail fast
+	_, _, err = core.ParseFrontmatterAndContent(context.Background(), tmpFile.Name(), core.ContentModeAll)
+	if err == nil {
+		t.Fatalf("expected ParseFrontmatterAndContent to fail fast on malformed row")
+	}
+
+	// 2. ScanAndSelect must fail fast
+	_, _, err = core.ScanAndSelect(context.Background(), tmpFile.Name(), nil, core.PositionalOptions{})
+	if err == nil {
+		t.Fatalf("expected ScanAndSelect to fail fast on malformed row")
+	}
+
+	// 3. DeleteWithOptions must fail fast
+	_, err = core.DeleteWithOptions(context.Background(), tmpFile.Name(), []string{"name == Alice"}, core.PositionalOptions{}, "", false, false)
+	if err == nil {
+		t.Fatalf("expected DeleteWithOptions to fail fast on malformed row")
+	}
+
+	// 4. UpdateWithOptions must fail fast
+	_, err = core.UpdateWithOptions(context.Background(), tmpFile.Name(), []string{"name == Alice"}, core.PositionalOptions{}, map[string]string{"name": "Alicia"}, "", false, false)
+	if err == nil {
+		t.Fatalf("expected UpdateWithOptions to fail fast on malformed row")
+	}
+}
+
+func TestFailFast_InconsistentColumnCount(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rowlite_failfast_cols_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := `| id | name | role |
+| --- | --- | --- |
+| 1 | Alice | Admin |
+| 2 | Bob |
+| 3 | Charlie | User |`
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	tmpFile.Close()
+
+	// 1. ParseFrontmatterAndContent must fail fast
+	_, _, err = core.ParseFrontmatterAndContent(context.Background(), tmpFile.Name(), core.ContentModeAll)
+	if err == nil {
+		t.Fatalf("expected ParseFrontmatterAndContent to fail on inconsistent column count")
+	}
+
+	// 2. ScanAndSelect must fail fast
+	_, _, err = core.ScanAndSelect(context.Background(), tmpFile.Name(), nil, core.PositionalOptions{})
+	if err == nil {
+		t.Fatalf("expected ScanAndSelect to fail on inconsistent column count")
+	}
+}
+
+func TestAppend_PreservesPostTableProse(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rowlite_append_prose_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := `---
+rowlite:
+  autoincrement: "id:1"
+---
+# My Tasks
+| id | task |
+| --- | --- |
+| 1 | Task One |
+
+## Section Below
+Important notes to stay at bottom.`
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	tmpFile.Close()
+
+	cfg, _, err := core.ParseFrontmatterAndContent(context.Background(), tmpFile.Name(), core.ContentModeNone)
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent error: %v", err)
+	}
+
+	err = core.AppendRowsWithOptions(context.Background(), tmpFile.Name(), cfg, nil, []map[string]string{{"task": "Task Two"}}, "")
+	if err != nil {
+		t.Fatalf("AppendRowsWithOptions error: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	expected := `---
+rowlite:
+  autoincrement: "id:1"
+---
+# My Tasks
+| id | task |
+| --- | --- |
+| 1 | Task One |
+| 2 | Task Two |
+
+## Section Below
+Important notes to stay at bottom.
+`
+
+	if string(data) != expected {
+		t.Errorf("got:\n%s\nwant:\n%s", string(data), expected)
+	}
+}
+

@@ -3,50 +3,9 @@ package core
 import (
 	"bufio"
 	"context"
-	"io"
 	"os"
 	"strings"
 )
-
-// AppendRowDirectly appends a row string directly to the end of the file.
-// It verifies the file ends with a newline first.
-func AppendRowDirectly(ctx context.Context, filePath string, row []string) error {
-	formatted := FormatGFMLine(row)
-
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	if stat.Size() > 0 {
-		_, err = file.Seek(-1, io.SeekEnd)
-		if err != nil {
-			return err
-		}
-		buf := make([]byte, 1)
-		_, err = file.Read(buf)
-		if err != nil {
-			return err
-		}
-		if buf[0] != '\n' {
-			_, err = file.WriteString("\n")
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	_, err = file.WriteString(formatted)
-	if err == nil {
-		_, err = file.WriteString("\n")
-	}
-	return err
-}
 
 // AtomicWriteTable writes frontmatter config, headers, separator, and rows atomically using a temp file.
 // It preserves unmodified surrounding content (non-table text and other frontmatter keys) if the table exists.

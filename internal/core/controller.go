@@ -495,22 +495,23 @@ func ParseFrontmatterAndContent(ctx context.Context, filePath string, mode Conte
 
 		if isTableRow(trimmed) {
 			cells, err := SplitGFMLine(line)
-			if err == nil {
-				if len(cells) != len(headers) {
-					return TableConfig{}, nil, fmt.Errorf("inconsistent column count: row has %d columns, expected %d", len(cells), len(headers))
+			if err != nil {
+				return TableConfig{}, nil, fmt.Errorf("malformed table row: %w", err)
+			}
+			if len(cells) != len(headers) {
+				return TableConfig{}, nil, fmt.Errorf("inconsistent column count: row has %d columns, expected %d", len(cells), len(headers))
+			}
+			rowCount++
+			if cfg.AutoIncrementIdx >= 0 && cfg.AutoIncrementIdx < len(cells) {
+				if v, err := strconv.Atoi(strings.TrimSpace(cells[cfg.AutoIncrementIdx])); err == nil && v > maxAutoIncVal {
+					maxAutoIncVal = v
 				}
-				rowCount++
-				if cfg.AutoIncrementIdx >= 0 && cfg.AutoIncrementIdx < len(cells) {
-					if v, err := strconv.Atoi(strings.TrimSpace(cells[cfg.AutoIncrementIdx])); err == nil && v > maxAutoIncVal {
-						maxAutoIncVal = v
-					}
-				}
-				switch actualMode {
-				case ContentModeAll:
-					rows = append(rows, cells)
-				case ContentModeLast:
-					lastRow = cells
-				}
+			}
+			switch actualMode {
+			case ContentModeAll:
+				rows = append(rows, cells)
+			case ContentModeLast:
+				lastRow = cells
 			}
 		} else {
 			// Once we hit a non-table line, GFM table ends
@@ -1190,24 +1191,28 @@ func AppendRowsWithOptions(
 		resolvedRows = append(resolvedRows, resolvedMap)
 	}
 
-	// Write phase - always append directly for performance
-	for _, rowCells := range validatedRows {
-		err := AppendRowDirectly(ctx, filePath, rowCells)
-		if err != nil {
-			return err
+	// Write phase via StreamTransformTable (single-pass streaming rewrite that strictly validates table structure,
+	// injects appended rows directly before post-table prose, and commits change journal records).
+	transformer := func(physicalRowIdx int, cells []string) ([]RowAction, error) {
+		if cells != nil {
+			return []RowAction{{Type: ActionKeep}}, nil
 		}
+
+		// Boundary event at end of table rows: inject all validatedRows
+		var actions []RowAction
+		for i, rowCells := range validatedRows {
+			actions = append(actions, RowAction{
+				Type:           ActionInsert,
+				Cells:          rowCells,
+				JournalOp:      "APPEND",
+				JournalPayload: resolvedRows[i],
+			})
+		}
+		return actions, nil
 	}
 
-	// Logging journal
-	if cfg.JournalLog != "" {
-		for i, rowMap := range resolvedRows {
-			rowIdx := len(existingRows) + i + 1
-			rowKey := ComputeRowKey(cfg, rowIdx, rowMap)
-			_ = WriteJournalRecord(ctx, cfg.JournalLog, "APPEND", rowKey, rowMap)
-		}
-	}
-
-	return nil
+	_, err := StreamTransformTable(ctx, filePath, cfg, transformer)
+	return err
 }
 
 // Append parses the table and appends a raw input string (JSON/CSV)

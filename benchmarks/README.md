@@ -14,5 +14,6 @@ Snapshots are named according to:
 | **2026-08-18 10:58:00** | [Single-Pass Streaming Pushdown](2026-08-18_105800_streaming_pushdown.md) | `Working` | Early exit & ring buffer pushdown: 5.5x cold speedup, 99.8% alloc reduction, 81.5ns hot head. |
 | **2026-08-20 15:02:00** | [Optimistic Concurrency & Checksum](2026-08-20_150200_optimistic_concurrency_checksum.md) | `Working` | Content-derived SHA-256 ETag checksums and `--if-match` / `--if-checksum` precondition validation. |
 | **2026-08-20 16:27:00** | [Streaming Table Updates](2026-08-20_162700_streaming_update.md) | `Working` | Stream-based in-place updates ($\mathcal{O}(1)$ RAM), pre-state isolation, auto-audit stamping, and OCC preconditions. |
+| **2026-08-27 09:05:00** | [Table Row Deletion & Unified Streaming Engine](2026-08-27_090500_delete_and_unified_streaming.md) | `f43c105` | StreamTransformTable engine, single-pass forward mutations (3x speedup), sequential []RowAction model, and fail-fast validation. |
 
 

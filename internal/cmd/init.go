@@ -16,6 +16,7 @@ const (
 	columnsFlag        = "columns"
 	uniqueFlag         = "unique"
 	sortFlag           = "sort"
+	auditFlag          = "audit"
 	auditInsertFlag    = "audit-insert"
 	auditEditFlag      = "audit-edit"
 	journalLogFlag     = "journal-log"
@@ -29,6 +30,7 @@ func NewInitCmd() *cobra.Command {
 		columnsVal       string
 		uniqueVal        string
 		sortVal          string
+		auditVal         bool
 		auditInsertVal   string
 		auditEditVal     string
 		journalVal       string
@@ -36,10 +38,32 @@ func NewInitCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "init <file>",
-		Short: "Initialize table frontmatter constraints",
+		Short: "Initialize table frontmatter constraints and headers",
+		Long: `Create a new markdown table file or update frontmatter constraints in-place.
+Supports column definitions, autoincrement integer IDs, automatic creation/modification timestamps, unique keys, sort rules, and change journaling.`,
+		Example: `  # Initialize a new table with column schema, autoincrement ID, and audit timestamps
+  rowlite init tasks.md --columns "id,task,status,priority" --autoincrement "id" --audit
+
+  # Initialize with custom autoincrement step, unique keys, and sort rule
+  rowlite init tasks.md --columns "id,task,status" --autoincrement "id:10" --unique "id" --sort "id:asc" --audit
+
+  # Update constraints on an existing markdown table in-place
+  rowlite init existing_table.md --autoincrement "id" --audit
+
+  # Shorthand flag aliases are also available (-c, -a, -i, -e, or combined -ie)
+  rowlite init tasks.md -c id,task,status -a id -ie`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath := args[0]
+
+			if auditVal {
+				if auditInsertVal == "" {
+					auditInsertVal = defaultAuditInsert
+				}
+				if auditEditVal == "" {
+					auditEditVal = defaultAuditEdit
+				}
+			}
 
 			var unique []string
 			if uniqueVal != "" {
@@ -122,20 +146,28 @@ func NewInitCmd() *cobra.Command {
 				}
 			}
 
-			return core.InitTable(cmd.Context(), filePath, columns, cfg)
+			if err := core.InitTable(cmd.Context(), filePath, columns, cfg); err != nil {
+				return err
+			}
+			if isVerboseOrDebug(cmd) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Successfully initialized table in %s\n", filePath)
+			}
+			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&columnsVal, columnsFlag, "", "ordered columns (comma-separated)")
-	cmd.Flags().StringVar(&uniqueVal, uniqueFlag, "", "unique key columns (comma-separated)")
-	cmd.Flags().StringVar(&sortVal, sortFlag, "", "frontmatter sort rule (e.g., id:asc)")
-	cmd.Flags().StringVar(&auditInsertVal, auditInsertFlag, "", "enable creation timestamp auditing with custom column name")
+	cmd.Flags().StringVarP(&columnsVal, columnsFlag, "c", "", "ordered columns (comma-separated)")
+	cmd.Flags().StringVarP(&uniqueVal, uniqueFlag, "u", "", "unique key columns (comma-separated)")
+	cmd.Flags().StringVarP(&sortVal, sortFlag, "s", "", "frontmatter sort rule (e.g., id:asc)")
+	cmd.Flags().BoolVar(&auditVal, auditFlag, false, "enable both creation (created_at) and edit (updated_at) timestamp auditing")
+	cmd.Flags().StringVarP(&auditInsertVal, auditInsertFlag, "i", "", "enable creation timestamp auditing with optional custom column name")
 	cmd.Flags().Lookup(auditInsertFlag).NoOptDefVal = defaultAuditInsert
 
-	cmd.Flags().StringVar(&auditEditVal, auditEditFlag, "", "enable modification timestamp auditing with custom column name")
+	cmd.Flags().StringVarP(&auditEditVal, auditEditFlag, "e", "", "enable modification timestamp auditing with optional custom column name")
 	cmd.Flags().Lookup(auditEditFlag).NoOptDefVal = defaultAuditEdit
-	cmd.Flags().StringVar(&journalVal, journalLogFlag, "", "path to change journal log file (logs 4-column change history: timestamp, operation, row_key, details)")
-	cmd.Flags().StringVar(&autoincrementVal, autoincrementFlag, "", "auto-increment column and optional step (e.g. id:10 or id; generates 1-based sequential integer IDs)")
+	cmd.Flags().StringVarP(&journalVal, journalLogFlag, "j", "", "path to change journal log file (logs 4-column change history: timestamp, operation, row_key, details)")
+	cmd.Flags().StringVarP(&autoincrementVal, autoincrementFlag, "a", "", "auto-increment column and optional step (e.g. id:10 or id; generates 1-based sequential integer IDs)")
+	cmd.Flags().BoolP("verbose", "v", false, "print verbose confirmation message on success")
 
 	return cmd
 }

@@ -78,6 +78,67 @@ func TestInitCmdErrors(t *testing.T) {
 	}
 }
 
+func TestInitCmd_ShorthandFlagsAndAudit(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "tasks.md")
+
+	// 1. Initialize with individual -i and -e flags
+	c := silenceCmd(cmd.NewInitCmd())
+	c.SetArgs([]string{dbPath, "-c", "id,task,status,priority", "-a", "id:1", "-u", "id", "-s", "id:asc", "-i", "-e"})
+
+	err := c.Execute()
+	if err != nil {
+		t.Fatalf("init with shorthand flags failed: %v", err)
+	}
+
+	structCmd := silenceCmd(cmd.NewStructureCmd())
+	var structBuf bytes.Buffer
+	structCmd.SetOut(&structBuf)
+	structCmd.SetArgs([]string{dbPath})
+
+	err = structCmd.Execute()
+	if err != nil {
+		t.Fatalf("structure command failed: %v", err)
+	}
+
+	out := structBuf.String()
+	if !strings.Contains(out, "Columns: id, task, status, priority, created_at, updated_at") {
+		t.Errorf("expected columns including audit fields, got: %s", out)
+	}
+	if !strings.Contains(out, "Unique Keys: id") {
+		t.Errorf("expected unique key, got: %s", out)
+	}
+	if !strings.Contains(out, "Sort Configuration: id:asc") {
+		t.Errorf("expected sort config, got: %s", out)
+	}
+	if !strings.Contains(out, "Audit Insert Column: created_at") {
+		t.Errorf("expected created_at audit insert, got: %s", out)
+	}
+	if !strings.Contains(out, "Audit Edit Column: updated_at") {
+		t.Errorf("expected updated_at audit edit, got: %s", out)
+	}
+
+	// 2. Initialize new table with combined -ie shorthand flags
+	dbPath2 := filepath.Join(tmpDir, "tasks_combined.md")
+	c2 := silenceCmd(cmd.NewInitCmd())
+	c2.SetArgs([]string{dbPath2, "-c", "id,task", "-a", "id", "-ie"})
+	if err := c2.Execute(); err != nil {
+		t.Fatalf("init with combined -ie failed: %v", err)
+	}
+
+	structCmd2 := silenceCmd(cmd.NewStructureCmd())
+	var structBuf2 bytes.Buffer
+	structCmd2.SetOut(&structBuf2)
+	structCmd2.SetArgs([]string{dbPath2})
+	if err := structCmd2.Execute(); err != nil {
+		t.Fatalf("structure command for combined -ie failed: %v", err)
+	}
+	out2 := structBuf2.String()
+	if !strings.Contains(out2, "Audit Insert Column: created_at") || !strings.Contains(out2, "Audit Edit Column: updated_at") {
+		t.Errorf("expected combined -ie to enable both audit columns, got: %s", out2)
+	}
+}
+
 func TestAppendAndListAndCountCmd(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "db.md")
@@ -980,7 +1041,7 @@ func TestUpdateCmd(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	// 1. Update using --where and --set
+	// 1. Update using --where and --set (default silent execution)
 	updateCmd1 := silenceCmd(cmd.NewUpdateCmd())
 	var out1 bytes.Buffer
 	updateCmd1.SetOut(&out1)
@@ -988,15 +1049,15 @@ func TestUpdateCmd(t *testing.T) {
 	if err := updateCmd1.Execute(); err != nil {
 		t.Fatalf("update with --where and --set failed: %v", err)
 	}
-	if !strings.Contains(out1.String(), "Successfully updated 2 row(s)") {
-		t.Errorf("unexpected output: %s", out1.String())
+	if out1.String() != "" {
+		t.Errorf("expected silent execution by default, got: %s", out1.String())
 	}
 
-	// 2. Update single row using --index and --data
+	// 2. Update single row using --index, --data, and --verbose
 	updateCmd2 := silenceCmd(cmd.NewUpdateCmd())
 	var out2 bytes.Buffer
 	updateCmd2.SetOut(&out2)
-	updateCmd2.SetArgs([]string{dbPath, "--index", "0", "--data", `{"priority":"Urgent"}`})
+	updateCmd2.SetArgs([]string{dbPath, "--index", "0", "--data", `{"priority":"Urgent"}`, "--verbose"})
 	if err := updateCmd2.Execute(); err != nil {
 		t.Fatalf("update with --index and --data failed: %v", err)
 	}
@@ -1086,7 +1147,7 @@ func TestUpdateCmd_ConditionlessRequiresAll(t *testing.T) {
 	cmdWithAll := silenceCmd(cmd.NewUpdateCmd())
 	var out bytes.Buffer
 	cmdWithAll.SetOut(&out)
-	cmdWithAll.SetArgs([]string{dbPath, "--set", "status=Done", "--all"})
+	cmdWithAll.SetArgs([]string{dbPath, "--set", "status=Done", "--all", "--verbose"})
 	if err := cmdWithAll.Execute(); err != nil {
 		t.Fatalf("update with --all failed: %v", err)
 	}
@@ -1142,7 +1203,7 @@ func TestDeleteCmd(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	// 1. Delete matching --where
+	// 1. Delete matching --where (default silent execution)
 	delCmd := silenceCmd(cmd.NewDeleteCmd())
 	var delBuf bytes.Buffer
 	delCmd.SetOut(&delBuf)
@@ -1150,8 +1211,8 @@ func TestDeleteCmd(t *testing.T) {
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete with --where failed: %v", err)
 	}
-	if !strings.Contains(delBuf.String(), "Successfully deleted 2 row(s)") {
-		t.Errorf("unexpected output: %s", delBuf.String())
+	if delBuf.String() != "" {
+		t.Errorf("expected silent execution by default, got: %s", delBuf.String())
 	}
 
 	// 2. Verify remaining rows
@@ -1176,11 +1237,11 @@ func TestDeleteCmd_PositionalSlicing(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	// Delete head 2
+	// Delete head 2 with --verbose
 	delCmd := silenceCmd(cmd.NewDeleteCmd())
 	var delBuf bytes.Buffer
 	delCmd.SetOut(&delBuf)
-	delCmd.SetArgs([]string{dbPath, "--head", "2"})
+	delCmd.SetArgs([]string{dbPath, "--head", "2", "--verbose"})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete head failed: %v", err)
 	}
@@ -1221,11 +1282,11 @@ func TestDeleteCmd_ConditionlessRequiresAll(t *testing.T) {
 		t.Errorf("expected error to mention '--all', got: %v", err)
 	}
 
-	// 2. Delete with --all -> succeeds
+	// 2. Delete with --all and --verbose -> succeeds
 	delCmd2 := silenceCmd(cmd.NewDeleteCmd())
 	var delBuf bytes.Buffer
 	delCmd2.SetOut(&delBuf)
-	delCmd2.SetArgs([]string{dbPath, "--all"})
+	delCmd2.SetArgs([]string{dbPath, "--all", "--verbose"})
 	if err := delCmd2.Execute(); err != nil {
 		t.Fatalf("delete with --all failed: %v", err)
 	}

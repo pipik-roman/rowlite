@@ -1,7 +1,14 @@
 # Rowlite
 
 Rowlite is an open-source, lightweight CLI tool and MCP server that works with Markdown tables - create, read, append, update, and delete.
-Instead of writing SQL queries or ad-hoc scripts, developers and AI agents interact with tabular data using simple, declarative actions (`list`, `append`, `update`, `delete`, `dedupe`) directly over columns.
+Instead of writing SQL queries or ad-hoc scripts, developers and AI agents interact with tabular data using simple, declarative actions (`list`, `append`, `update`, `delete`, `sort`) directly over columns.
+
+<div align="center">
+  <a href="https://github.com/pipik-roman/rowlite">
+    <img src="docs/assets/rowlite-demo.gif" alt="Rowlite CLI and MCP Server Demonstration" width="100%" style="max-width: 950px; border-radius: 8px;" />
+  </a>
+  <p><em>Demonstration of Rowlite initializing tables, executing auto-increment appends, querying, updating, and formatting Markdown in Go.</em></p>
+</div>
 
 ## Why I created rowlite
 
@@ -105,15 +112,29 @@ rowlite mcp-setup --client copilot
 
 ## CLI Commands
 - `rowlite help` - See CLI help for details
-- `rowlite init <file> [--columns "id,name"] [--unique "id"] [--sort "id:asc"] [--autoincrement "id:10"] [--journal-log "journal.log"]` - Create new markdown table file or update frontmatter constraints in-place. 
-- `rowlite structure <file>` - Display column names, constraints, audit log mappings, and current ETag checksum.
-- `rowlite list <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--format json|csv|tsv|md|pretty] [--include-row-number] [--include-metadata]` - Query, filter, and slice rows.
+- `rowlite init <file> [--columns "id,name"] [--autoincrement "id:10"] [--audit | --audit-insert | --audit-edit] [--unique "id"] [--sort "id:asc"] [--journal-log "journal.log"]` - Create new markdown table file or update frontmatter constraints in-place (also supports shorthand flags `-c`, `-a`, `-i`, `-e`, or combined `-ie`, `-u`, `-s`, `-j`).
+- `rowlite structure <file>` - Display column names, alignments, constraints, audit log mappings, and current ETag checksum.
+- `rowlite list <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--format auto|pretty|md|json|csv|tsv] [--include-row-number] [--include-metadata]` - Query, filter, and slice rows.
 - `rowlite count <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L]` - Count queried, filtered, or sliced rows.
-- `rowlite append <file> --row '{"col1": "val1"}' [--if-match "<etag>" | --if-checksum "<etag>" | --checksum "<etag>"]` - Append a row, applying validations and optional OCC precondition. Use JSON or CSV.
-- `rowlite update <file> [--where "..."] [--set "col=val"] [--data '{"col":"val"}'] [--index "..."] [--head N] [--tail N] [--all] [--dry-run] [--if-match "<etag>"]` - Update matching rows in-place (supports pre-state isolation, auto-audit stamping, OCC, and `--all` conditionless safety).
+- `rowlite append <file> [data-string] [--row '{"col1": "val1"}'] [--if-match "<etag>" | --if-checksum "<etag>" | --checksum "<etag>"]` - Append a row formatted as JSON or CSV (or via stdin), applying validations and optional OCC precondition.
+- `rowlite update <file> [data-string] [--where "..."] [--set "col=val"] [--data '{"col":"val"}'] [--index "..."] [--head N] [--tail N] [--all] [--dry-run] [--if-match "<etag>"]` - Update matching rows in-place (supports pre-state isolation, auto-audit stamping, OCC, and `--all` conditionless safety).
 - `rowlite delete <file> [--where "..."] [--head N] [--tail N] [--index "..."] [--offset O] [--limit L] [--all] [--dry-run] [--if-match "<etag>"]` - Delete matching rows from table (supports WHERE filters, positional slicing, change journaling, dry-run, OCC, and `--all` conditionless safety).
-- `rowlite dedupe <file> --column <name>` - Purge duplicate records in place.
-- `rowlite sort <file> --by "column:order,..."` - Sort the table. Useful for one-time sort or trigger the sorting from now-on.
+- `rowlite sort <file> [--by "column:order,..."] [--trigger]` - Sort table in-place (optionally update frontmatter sort constraint permanently via `--trigger`).
+- `rowlite mcp-setup [--client <name>] [--scale global|workspace] [--dry-run]` - Register rowlite MCP server in AI client configuration files.
+
+### Table Initialization (`init`)
+Create a new structured Markdown table or update frontmatter constraints in-place:
+
+```bash
+# Initialize a new table with autoincrement ID and automatic created_at/updated_at audit columns
+rowlite init tasks.md --columns "id,task,status,priority" --autoincrement "id" --audit
+
+# Initialize with custom unique key, autoincrement step, and auto-sort rule
+rowlite init tasks.md --columns "id,task,status" --autoincrement "id:10" --unique "id" --sort "id:asc" --audit
+
+# Update frontmatter constraints on an existing table without modifying rows
+rowlite init existing_table.md --autoincrement "id" --audit
+```
 
 ### Querying & Slicing Tables
 You can filter table rows by content using `--where`, or select rows by position using `--head`, `--tail`, `--index`, and pagination flags (`--offset`, `--limit`).

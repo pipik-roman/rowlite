@@ -60,7 +60,13 @@ func NewAppendCmd() *cobra.Command {
 				}
 			}
 
-			return core.AppendWithOptions(cmd.Context(), filePath, dataStr, expectedHash)
+			if err := core.AppendWithOptions(cmd.Context(), filePath, dataStr, expectedHash); err != nil {
+				return err
+			}
+			if isVerboseOrDebug(cmd) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Successfully appended row to %s\n", filePath)
+			}
+			return nil
 		},
 	}
 
@@ -68,6 +74,7 @@ func NewAppendCmd() *cobra.Command {
 	cmd.Flags().StringVar(&ifMatchFlag, ifMatchFlagName, "", "Precondition table checksum (ETag) for optimistic concurrency control")
 	cmd.Flags().StringVar(&ifChecksumFlag, "if-checksum", "", "Alias for --if-match (precondition table checksum)")
 	cmd.Flags().StringVar(&checksumFlag, "checksum", "", "Alias for --if-match (precondition table checksum)")
+	cmd.Flags().BoolP("verbose", "v", false, "print verbose confirmation message on success")
 
 	return cmd
 }

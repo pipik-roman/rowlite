@@ -64,7 +64,9 @@ func NewDeleteCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Successfully deleted %d row(s) from %s\n", count, filePath)
+			if isVerboseOrDebug(cmd) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Successfully deleted %d row(s) from %s\n", count, filePath)
+			}
 			return nil
 		},
 	}
@@ -80,6 +82,7 @@ func NewDeleteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&checksumFlag, "checksum", "", "Alias for --if-match (precondition table checksum)")
 	cmd.Flags().BoolVar(&allFlag, "all", false, "Allow deleting all rows when no filter or positional selector is provided")
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Preview the number of matching rows to delete without modifying the file")
+	cmd.Flags().BoolP("verbose", "v", false, "Print verbose confirmation message on success")
 
 	return cmd
 }

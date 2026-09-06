@@ -106,7 +106,9 @@ func NewUpdateCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Successfully updated %d row(s) in %s\n", count, filePath)
+			if isVerboseOrDebug(cmd) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Successfully updated %d row(s) in %s\n", count, filePath)
+			}
 			return nil
 		},
 	}
@@ -124,6 +126,7 @@ func NewUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&checksumFlag, "checksum", "", "Alias for --if-match (precondition table checksum)")
 	cmd.Flags().BoolVar(&allFlag, "all", false, "Allow updating all rows when no filter or positional selector is provided")
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Preview the number of matching rows to update without modifying the file")
+	cmd.Flags().BoolP("verbose", "v", false, "Print verbose confirmation message on success")
 
 	return cmd
 }

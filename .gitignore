@@ -23,6 +23,5 @@ rowlite.exe
 .env
 *.tmp
 *.log
-.agents/mcp_config.json
-
-
+.agents/
+.gemini/

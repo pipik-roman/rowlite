@@ -13,6 +13,7 @@ var (
 
 func NewRootCmd() *cobra.Command {
 	var debugVal bool
+	var verboseVal bool
 
 	cmd := &cobra.Command{
 		Use:     "rowlite",
@@ -29,6 +30,7 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().BoolVar(&debugVal, "debug", false, "print detailed table scanning diagnostics and resolved table configuration metadata to stderr")
+	cmd.PersistentFlags().BoolVarP(&verboseVal, "verbose", "v", false, "print verbose operation status messages to stdout")
 
 	cmd.AddCommand(NewInitCmd())
 	cmd.AddCommand(NewListCmd())
@@ -42,4 +44,23 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(NewSetupMCPCmd())
 
 	return cmd
+}
+
+func isVerboseOrDebug(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	if v, err := cmd.Flags().GetBool("verbose"); err == nil && v {
+		return true
+	}
+	if d, err := cmd.Flags().GetBool("debug"); err == nil && d {
+		return true
+	}
+	if v, err := cmd.InheritedFlags().GetBool("verbose"); err == nil && v {
+		return true
+	}
+	if d, err := cmd.InheritedFlags().GetBool("debug"); err == nil && d {
+		return true
+	}
+	return false
 }

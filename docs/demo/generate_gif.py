@@ -226,7 +226,9 @@ def generate_frames():
     sandbox_dir = tempfile.mkdtemp(prefix="rowlite_demo_")
     
     try:
-        frames = []
+        frames_part1 = []
+        frames_part2 = []
+        target_frames = frames_part1
         current_lines = []
         
         def add_blank(n=1):
@@ -237,7 +239,7 @@ def generate_frames():
             current_lines.append([(comment, OVERLAY_COLOR, False)])
             frame = render_screen(current_lines)
             for _ in range(hold_comment):
-                frames.append(frame)
+                target_frames.append(frame)
             
             prompt = "❯ "
             f_temp = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
@@ -258,13 +260,13 @@ def generate_frames():
                 line_copy = list(current_lines)
                 line_copy.append(hl)
                 frame = render_screen(line_copy, cursor_pos=(len(current_lines), cursor_x))
-                frames.append(frame)
+                target_frames.append(frame)
                 
             hl_final = highlight_command(prompt, cmd_full)
             current_lines.append(hl_final)
             frame = render_screen(current_lines)
             for _ in range(hold_after):
-                frames.append(frame)
+                target_frames.append(frame)
                 
             if pre_exec_sleep > 0:
                 time.sleep(pre_exec_sleep)
@@ -277,13 +279,18 @@ def generate_frames():
                     colored_line = parse_output_line_colors(line)
                     current_lines.append(colored_line)
                 frame = render_screen(current_lines)
-                frames.append(frame)
+                target_frames.append(frame)
                 
             return real_output
             
+        # ==========================================
+        # PART 1: Init, Append, and List (Screen 1)
+        # ==========================================
+        target_frames = frames_part1
+        
         # Initial pause (1.0s)
         for _ in range(15):
-            frames.append(render_screen([([("❯ ", PROMPT_COLOR, True)])], cursor_pos=(0, PADDING + 16)))
+            target_frames.append(render_screen([([("❯ ", PROMPT_COLOR, True)])], cursor_pos=(0, PADDING + 16)))
         
         # 1. Step 1: Init table with explicit columns and autoincrement with --audit
         type_command(
@@ -312,7 +319,7 @@ def generate_frames():
         )
         add_blank(1)
         
-        # 3. Step 3: List table (invokes real rowlite list)
+        # 3. Step 3: Query table with clean Unicode formatting
         type_command(
             "# Step 3: Query table with clean Unicode formatting",
             'rowlite list tasks.md --format pretty',
@@ -321,13 +328,20 @@ def generate_frames():
             hold_after=10
         )
         
-        # Pause on live table view (3.3s)
+        # Pause on live table view (4.0s for Part 1)
         frame = render_screen(current_lines)
-        for _ in range(50):
-            frames.append(frame)
+        for _ in range(60):
+            target_frames.append(frame)
             
-        # Clear screen for next step
+        # ==========================================
+        # PART 2: Update and Cat (Screen 2)
+        # ==========================================
+        target_frames = frames_part2
         current_lines = []
+        
+        # Initial pause for Part 2 (1.0s)
+        for _ in range(15):
+            target_frames.append(render_screen([([("❯ ", PROMPT_COLOR, True)])], cursor_pos=(0, PADDING + 16)))
         
         # 4. Step 4: Update row (invokes real rowlite update with real wait time for clear timestamp mutation)
         type_command(
@@ -341,7 +355,7 @@ def generate_frames():
         
         frame = render_screen(current_lines)
         for _ in range(18): # 1.2s pause after update
-            frames.append(frame)
+            target_frames.append(frame)
         add_blank(1)
         
         # 5. Step 5: Verify on disk (reads actual file from disk)
@@ -356,25 +370,20 @@ def generate_frames():
         # Pause at end to inspect Markdown table (4.3s)
         frame = render_screen(current_lines)
         for _ in range(65):
-            frames.append(frame)
+            target_frames.append(frame)
             
-        return frames
+        return frames_part1, frames_part2
     finally:
         shutil.rmtree(sandbox_dir, ignore_errors=True)
 
-def build_gif():
-    frames = generate_frames()
-    print(f"Generated {len(frames)} frames ({len(frames)/FPS:.1f}s)")
-    
+def save_gif_from_frames(frames, output_path):
     temp_dir = tempfile.mkdtemp()
     try:
         for idx, f in enumerate(frames):
             frame_path = os.path.join(temp_dir, f"frame_{idx:04d}.png")
             f.save(frame_path)
             
-        output_gif = r"c:\work\git\rowlite\docs\assets\rowlite-demo.gif"
         palette_path = os.path.join(temp_dir, "palette.png")
-        
         cmd_palette = [
             "ffmpeg", "-y",
             "-framerate", str(FPS),
@@ -390,14 +399,30 @@ def build_gif():
             "-i", os.path.join(temp_dir, "frame_%04d.png"),
             "-i", palette_path,
             "-lavfi", "paletteuse=dither=bayer:bayer_scale=3",
-            output_gif
+            output_path
         ]
         subprocess.run(cmd_gif, check=True)
         
-        size_kb = os.path.getsize(output_gif) / 1024
-        print(f"Successfully generated {output_gif} ({size_kb:.1f} KB)")
+        size_kb = os.path.getsize(output_path) / 1024
+        print(f"Successfully generated {output_path} ({size_kb:.1f} KB, {len(frames)/FPS:.1f}s)")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+def build_gif():
+    frames_p1, frames_p2 = generate_frames()
+    frames_full = frames_p1 + frames_p2
+    
+    assets_dir = r"c:\work\git\rowlite\docs\assets"
+    os.makedirs(assets_dir, exist_ok=True)
+    
+    # 1. Full combined demo
+    save_gif_from_frames(frames_full, os.path.join(assets_dir, "rowlite-demo.gif"))
+    
+    # 2. Part 1 (Screen 1): Init, Append, and List
+    save_gif_from_frames(frames_p1, os.path.join(assets_dir, "rowlite-demo-part1.gif"))
+    
+    # 3. Part 2 (Screen 2): Update and Cat
+    save_gif_from_frames(frames_p2, os.path.join(assets_dir, "rowlite-demo-part2.gif"))
 
 if __name__ == "__main__":
     build_gif()

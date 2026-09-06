@@ -116,23 +116,61 @@ def highlight_command(prompt_str, cmd_str):
     tokens = []
     tokens.append((prompt_str, PROMPT_COLOR, True))
     
-    parts = cmd_str.split(" ")
-    for i, p in enumerate(parts):
-        if i == 0 and p == "rowlite":
-            tokens.append((p, CMD_COLOR, True))
-        elif i == 1 and parts[0] == "rowlite":
-            tokens.append((p, SUB_CMD_COLOR, True))
-        elif p.startswith("--") or p.startswith("-"):
-            tokens.append((p, FLAG_COLOR, False))
-        elif p.startswith('"') or p.startswith("'") or p.endswith('"') or p.endswith("'") or "," in p:
-            tokens.append((p, ARG_COLOR, False))
-        elif p == "cat":
-            tokens.append((p, SUB_CMD_COLOR, True))
+    if not cmd_str:
+        return tokens
+        
+    # Quote-aware lexer to keep arguments inside quotes together
+    lexemes = []
+    current = ""
+    in_quote = None
+    
+    for ch in cmd_str:
+        if ch in ('"', "'"):
+            if in_quote == ch:
+                in_quote = None
+                current += ch
+            elif in_quote is None:
+                in_quote = ch
+                current += ch
+            else:
+                current += ch
+        elif ch == ' ' and in_quote is None:
+            if current:
+                lexemes.append(current)
+                current = ""
+            lexemes.append(' ')
         else:
-            tokens.append((p, TEXT_COLOR, False))
+            current += ch
             
-        if i < len(parts) - 1:
-            tokens.append((" ", TEXT_COLOR, False))
+    if current:
+        lexemes.append(current)
+        
+    non_space_count = 0
+    first_cmd = ""
+    
+    for lex in lexemes:
+        if lex == ' ':
+            tokens.append((' ', TEXT_COLOR, False))
+            continue
+            
+        non_space_count += 1
+        
+        if non_space_count == 1:
+            first_cmd = lex
+            if lex == "rowlite":
+                tokens.append((lex, CMD_COLOR, True))
+            elif lex == "cat":
+                tokens.append((lex, SUB_CMD_COLOR, True))
+            else:
+                tokens.append((lex, CMD_COLOR, True))
+        elif non_space_count == 2 and first_cmd == "rowlite":
+            tokens.append((lex, SUB_CMD_COLOR, True))
+        elif lex.startswith("-"):
+            tokens.append((lex, FLAG_COLOR, False))
+        elif lex.startswith('"') or lex.startswith("'") or lex.endswith('"') or lex.endswith("'") or ("," in lex):
+            tokens.append((lex, ARG_COLOR, False))
+        else:
+            tokens.append((lex, TEXT_COLOR, False))
             
     return tokens
 

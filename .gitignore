@@ -25,3 +25,6 @@ rowlite.exe
 *.log
 .agents/
 .gemini/
+
+# Media / video
+*.mp4

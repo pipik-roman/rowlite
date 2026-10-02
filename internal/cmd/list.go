@@ -235,10 +235,497 @@ func isTerminal(w io.Writer) bool {
 	return false
 }
 
+func getTerminalWidth() int {
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		w, _, err := term.GetSize(int(os.Stdout.Fd()))
+		if err == nil && w > 20 {
+			return w
+		}
+	}
+	return 100
+}
+
+// WrapSoft wraps text into lines of at most width runes at whitespace boundaries.
+func WrapSoft(text string, width int) []string {
+	if width <= 0 {
+		return []string{text}
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return []string{""}
+	}
+
+	paragraphs := strings.Split(text, "\n")
+	var result []string
+
+	for _, p := range paragraphs {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			result = append(result, "")
+			continue
+		}
+
+		words := strings.Fields(p)
+		var currentLine strings.Builder
+		currentLen := 0
+
+		for _, word := range words {
+			wLen := utf8.RuneCountInString(word)
+			if currentLen == 0 {
+				if wLen <= width {
+					currentLine.WriteString(word)
+					currentLen = wLen
+				} else {
+					runes := []rune(word)
+					for len(runes) > width {
+						result = append(result, string(runes[:width]))
+						runes = runes[width:]
+					}
+					currentLine.WriteString(string(runes))
+					currentLen = len(runes)
+				}
+			} else if currentLen+1+wLen <= width {
+				currentLine.WriteString(" ")
+				currentLine.WriteString(word)
+				currentLen += 1 + wLen
+			} else {
+				result = append(result, currentLine.String())
+				currentLine.Reset()
+				currentLine.WriteString(word)
+				currentLen = wLen
+			}
+		}
+		if currentLine.Len() > 0 {
+			result = append(result, currentLine.String())
+		}
+	}
+
+	if len(result) == 0 {
+		return []string{""}
+	}
+	return result
+}
+
+// VerticalCardRenderer formats and writes each record as an expanded vertical card.
+type VerticalCardRenderer struct {
+	MaxWidth int
+}
+
+func (v VerticalCardRenderer) Render(out io.Writer, headers []string, rows [][]string) error {
+	w := v.MaxWidth
+	if w <= 0 {
+		w = getTerminalWidth()
+	}
+	if w < 40 {
+		w = 40
+	}
+
+	maxHeaderLen := 0
+	for _, h := range headers {
+		hl := utf8.RuneCountInString(h)
+		if hl > maxHeaderLen {
+			maxHeaderLen = hl
+		}
+	}
+
+	valWidth := w - maxHeaderLen - 4
+	if valWidth < 20 {
+		valWidth = 20
+	}
+
+	for rIdx, row := range rows {
+		recordLabel := fmt.Sprintf("-[ RECORD %d ]", rIdx+1)
+		dashes := w - utf8.RuneCountInString(recordLabel)
+		if dashes < 2 {
+			dashes = 2
+		}
+		if _, err := fmt.Fprintf(out, "%s%s\n", recordLabel, strings.Repeat("-", dashes)); err != nil {
+			return err
+		}
+
+		for cIdx, h := range headers {
+			val := ""
+			if cIdx < len(row) {
+				val = row[cIdx]
+			}
+			wrapped := WrapSoft(val, valWidth)
+			paddedHeader := formatAlignedCell(h, maxHeaderLen, "right")
+			for subIdx, subLine := range wrapped {
+				if subIdx == 0 {
+					if _, err := fmt.Fprintf(out, "%s : %s\n", paddedHeader, subLine); err != nil {
+						return err
+					}
+				} else {
+					if _, err := fmt.Fprintf(out, "%s   %s\n", strings.Repeat(" ", maxHeaderLen), subLine); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if _, err := fmt.Fprintln(out); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type ColumnPlacement struct {
+	ColIdx int
+	Width  int
+}
+
+type LinePlacement struct {
+	StartIndex int
+	Columns    []ColumnPlacement
+}
+
+func computeLinePlacements(headers []string, rows [][]string, W int) []LinePlacement {
+	totalCols := len(headers)
+	colMax := make([]int, totalCols)
+	for i, h := range headers {
+		colMax[i] = utf8.RuneCountInString(h)
+	}
+	for _, row := range rows {
+		for i, val := range row {
+			if i < totalCols {
+				lines := strings.Split(strings.TrimSpace(val), "\n")
+				for _, l := range lines {
+					w := utf8.RuneCountInString(strings.TrimRight(l, "\r"))
+					if w > colMax[i] {
+						colMax[i] = w
+					}
+				}
+			}
+		}
+	}
+
+	totalNaturalWidth := 1
+	for c := 0; c < totalCols; c++ {
+		colW := colMax[c]
+		minW := utf8.RuneCountInString(headers[c])
+		if colW < minW {
+			colW = minW
+		}
+		if colW < 1 {
+			colW = 1
+		}
+		colMax[c] = colW
+		totalNaturalWidth += colW + 3
+	}
+
+	// If the entire table fits naturally within W on a single line, do not stretch or fold.
+	if totalNaturalWidth <= W {
+		lp := LinePlacement{
+			StartIndex: 0,
+			Columns:    make([]ColumnPlacement, totalCols),
+		}
+		for c := 0; c < totalCols; c++ {
+			lp.Columns[c] = ColumnPlacement{ColIdx: c, Width: colMax[c]}
+		}
+		return []LinePlacement{lp}
+	}
+
+	var lines []LinePlacement
+	colIdx := 0
+
+	for lineIdx := 0; colIdx < totalCols; lineIdx++ {
+		startIdx := lineIdx
+		maxStart := W / 2
+		if maxStart < 1 {
+			maxStart = 1
+		}
+		if startIdx > maxStart {
+			startIdx = maxStart
+		}
+
+		availWidth := W - startIdx - 1
+		if availWidth < 10 {
+			availWidth = 10
+		}
+		halfLine := availWidth / 2
+
+		lp := LinePlacement{
+			StartIndex: startIdx,
+		}
+
+		currentX := startIdx + 1
+
+		for colIdx < totalCols {
+			c := colIdx
+			isLong := colMax[c] > halfLine
+
+			if isLong {
+				if len(lp.Columns) == 0 {
+					colW := W - currentX - 3
+					if colW < halfLine {
+						colW = halfLine
+					}
+					lp.Columns = append(lp.Columns, ColumnPlacement{ColIdx: c, Width: colW})
+					currentX += colW + 3
+					colIdx++
+					break
+				} else {
+					rem := W - currentX - 3
+					if rem >= halfLine {
+						lp.Columns = append(lp.Columns, ColumnPlacement{ColIdx: c, Width: rem})
+						currentX += rem + 3
+						colIdx++
+						break
+					} else {
+						break
+					}
+				}
+			} else {
+				colW := colMax[c]
+				minW := utf8.RuneCountInString(headers[c])
+				if colW < minW {
+					colW = minW
+				}
+				if currentX+colW+3 <= W || len(lp.Columns) == 0 {
+					if currentX+colW+3 > W {
+						colW = W - currentX - 3
+						if colW < 5 {
+							colW = 5
+						}
+					}
+					lp.Columns = append(lp.Columns, ColumnPlacement{ColIdx: c, Width: colW})
+					currentX += colW + 3
+					colIdx++
+				} else {
+					break
+				}
+			}
+		}
+
+		if len(lp.Columns) > 0 {
+			used := startIdx + 1
+			for _, cp := range lp.Columns {
+				used += cp.Width + 3
+			}
+			rem := W - used
+			if rem > 0 {
+				lp.Columns[len(lp.Columns)-1].Width += rem
+			}
+			lines = append(lines, lp)
+		}
+	}
+
+	return lines
+}
+
+// StaggeredTableRenderer formats table using single-tier staggered folding rules.
+type StaggeredTableRenderer struct {
+	Alignments []string
+	MaxWidth   int
+}
+
+func (s StaggeredTableRenderer) Render(out io.Writer, headers []string, rows [][]string) error {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	w := s.MaxWidth
+	if w <= 0 {
+		w = getTerminalWidth()
+	}
+	if w < 40 {
+		w = 40
+	}
+
+	lines := computeLinePlacements(headers, rows, w)
+	if len(lines) == 0 {
+		return nil
+	}
+
+	var sb strings.Builder
+
+	// Top border of Line 0
+	sb.WriteString("┌")
+	for i, cp := range lines[0].Columns {
+		if i > 0 {
+			sb.WriteString("┬")
+		}
+		sb.WriteString(strings.Repeat("─", cp.Width+2))
+	}
+	sb.WriteString("┐\n")
+
+	// Header row for Line 0
+	sb.WriteString("│")
+	for _, cp := range lines[0].Columns {
+		align := ""
+		if cp.ColIdx < len(s.Alignments) {
+			align = s.Alignments[cp.ColIdx]
+		}
+		sb.WriteString(" ")
+		sb.WriteString(formatAlignedCell(headers[cp.ColIdx], cp.Width, align))
+		sb.WriteString(" │")
+	}
+	sb.WriteString("\n")
+
+	// Subsequent header lines (Line 1..k)
+	for lIdx := 1; lIdx < len(lines); lIdx++ {
+		lp := lines[lIdx]
+		sb.WriteString(strings.Repeat("│", lp.StartIndex))
+		sb.WriteString("┌")
+		for i, cp := range lp.Columns {
+			if i > 0 {
+				sb.WriteString("┬")
+			}
+			sb.WriteString(strings.Repeat("─", cp.Width+2))
+		}
+		sb.WriteString("┤\n")
+
+		sb.WriteString(strings.Repeat("│", lp.StartIndex))
+		sb.WriteString("│")
+		for _, cp := range lp.Columns {
+			align := ""
+			if cp.ColIdx < len(s.Alignments) {
+				align = s.Alignments[cp.ColIdx]
+			}
+			sb.WriteString(" ")
+			sb.WriteString(formatAlignedCell(headers[cp.ColIdx], cp.Width, align))
+			sb.WriteString(" │")
+		}
+		sb.WriteString("\n")
+	}
+
+	// Separator between Header block and Data rows
+	if len(lines) == 1 {
+		sb.WriteString("├")
+		for i, cp := range lines[0].Columns {
+			if i > 0 {
+				sb.WriteString("┼")
+			}
+			sb.WriteString(strings.Repeat("─", cp.Width+2))
+		}
+		sb.WriteString("┤\n")
+	} else {
+		lastLine := lines[len(lines)-1]
+		sb.WriteString("╞")
+		for r := 0; r < lastLine.StartIndex; r++ {
+			sb.WriteString("╧")
+		}
+		usedSoFar := 1 + lastLine.StartIndex
+		for i, cp := range lastLine.Columns {
+			if i > 0 {
+				sb.WriteString("╧")
+				usedSoFar++
+			}
+			segLen := cp.Width + 2
+			sb.WriteString(strings.Repeat("═", segLen))
+			usedSoFar += segLen
+		}
+		if w > usedSoFar+1 {
+			sb.WriteString(strings.Repeat("═", w-1-usedSoFar))
+		}
+		sb.WriteString("╡\n")
+	}
+
+	// Data rows
+	for rIdx, row := range rows {
+		for lIdx, lp := range lines {
+			if lIdx > 0 {
+				sb.WriteString(strings.Repeat("│", lp.StartIndex))
+				sb.WriteString("┌")
+				for i, cp := range lp.Columns {
+					if i > 0 {
+						sb.WriteString("┬")
+					}
+					sb.WriteString(strings.Repeat("─", cp.Width+2))
+				}
+				sb.WriteString("┤\n")
+			}
+
+			wrapped := make([][]string, len(lp.Columns))
+			maxH := 1
+			for cIdx, cp := range lp.Columns {
+				val := ""
+				if cp.ColIdx < len(row) {
+					val = row[cp.ColIdx]
+				}
+				cellLines := WrapSoft(val, cp.Width)
+				wrapped[cIdx] = cellLines
+				if len(cellLines) > maxH {
+					maxH = len(cellLines)
+				}
+			}
+
+			for sub := 0; sub < maxH; sub++ {
+				if lp.StartIndex > 0 {
+					sb.WriteString(strings.Repeat("│", lp.StartIndex))
+				}
+				sb.WriteString("│")
+				for cIdx, cp := range lp.Columns {
+					lineText := ""
+					if sub < len(wrapped[cIdx]) {
+						lineText = wrapped[cIdx][sub]
+					}
+					align := ""
+					if cp.ColIdx < len(s.Alignments) {
+						align = s.Alignments[cp.ColIdx]
+					}
+					sb.WriteString(" ")
+					sb.WriteString(formatAlignedCell(lineText, cp.Width, align))
+					sb.WriteString(" │")
+				}
+				sb.WriteString("\n")
+			}
+		}
+
+		if rIdx < len(rows)-1 {
+			if len(lines) == 1 {
+				sb.WriteString("├")
+				for i, cp := range lines[0].Columns {
+					if i > 0 {
+						sb.WriteString("┼")
+					}
+					sb.WriteString(strings.Repeat("─", cp.Width+2))
+				}
+				sb.WriteString("┤\n")
+			} else {
+				lastLine := lines[len(lines)-1]
+				sb.WriteString("├")
+				for r := 0; r < lastLine.StartIndex; r++ {
+					sb.WriteString("┴")
+				}
+				used := 1 + lastLine.StartIndex
+				sb.WriteString(strings.Repeat("─", w-1-used))
+				sb.WriteString("┤\n")
+			}
+		} else {
+			if len(lines) == 1 {
+				sb.WriteString("└")
+				for i, cp := range lines[0].Columns {
+					if i > 0 {
+						sb.WriteString("┴")
+					}
+					sb.WriteString(strings.Repeat("─", cp.Width+2))
+				}
+				sb.WriteString("┘\n")
+			} else {
+				lastLine := lines[len(lines)-1]
+				sb.WriteString("└")
+				for r := 0; r < lastLine.StartIndex; r++ {
+					sb.WriteString("┴")
+				}
+				used := 1 + lastLine.StartIndex
+				sb.WriteString(strings.Repeat("─", w-1-used))
+				sb.WriteString("┘\n")
+			}
+		}
+	}
+
+	_, err := io.WriteString(out, sb.String())
+	return err
+}
+
 func NewListCmd() *cobra.Command {
 	const whereFlagName = "where"
 	var whereFlags []string
 	var formatFlag string
+	var nowrapFlag bool
+	var expandedFlag bool
+	var maxWidthFlag int
 	var headFlag int
 	var tailFlag int
 	var indexFlag string
@@ -254,12 +741,15 @@ func NewListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath := args[0]
 
+			if expandedFlag {
+				formatFlag = "expanded"
+			}
 			formatFlag = strings.ToLower(strings.TrimSpace(formatFlag))
 			switch formatFlag {
-			case "auto", "json", "csv", "tsv", "md", "markdown", "pretty":
+			case "auto", "json", "csv", "tsv", "md", "markdown", "pretty", "expanded":
 				// Valid format
 			default:
-				return fmt.Errorf("invalid format: %q (must be one of: auto, json, csv, tsv, md, markdown, pretty)", formatFlag)
+				return fmt.Errorf("invalid format: %q (must be one of: auto, json, csv, tsv, md, markdown, pretty, expanded)", formatFlag)
 			}
 
 			var posOpts core.PositionalOptions
@@ -373,11 +863,21 @@ func NewListCmd() *cobra.Command {
 				renderer = CSVRenderer{Comma: '\t'}
 			case "md", "markdown":
 				renderer = GFMRenderer{Alignments: renderAlignments}
+			case "expanded":
+				renderer = VerticalCardRenderer{MaxWidth: maxWidthFlag}
 			case "pretty":
-				renderer = PrettyRenderer{Alignments: renderAlignments}
+				if nowrapFlag {
+					renderer = PrettyRenderer{Alignments: renderAlignments}
+				} else {
+					renderer = StaggeredTableRenderer{Alignments: renderAlignments, MaxWidth: maxWidthFlag}
+				}
 			case "auto":
 				if isTerminal(cmd.OutOrStdout()) {
-					renderer = PrettyRenderer{Alignments: renderAlignments}
+					if nowrapFlag {
+						renderer = PrettyRenderer{Alignments: renderAlignments}
+					} else {
+						renderer = StaggeredTableRenderer{Alignments: renderAlignments, MaxWidth: maxWidthFlag}
+					}
 				} else {
 					renderer = GFMRenderer{Alignments: renderAlignments}
 				}
@@ -388,7 +888,10 @@ func NewListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringSliceVar(&whereFlags, whereFlagName, nil, "WHERE conditions (supported operators: ==, !=, like, regex)")
-	cmd.Flags().StringVarP(&formatFlag, "format", "o", "auto", "Output format (auto, json, csv, tsv, md, pretty)")
+	cmd.Flags().StringVarP(&formatFlag, "format", "o", "auto", "Output format (auto, json, csv, tsv, md, pretty, expanded)")
+	cmd.Flags().BoolVar(&nowrapFlag, "nowrap", false, "Disable folding and word-wrapping; force unconstrained single-line grid")
+	cmd.Flags().BoolVarP(&expandedFlag, "expanded", "x", false, "Display records in expanded vertical key-value card view")
+	cmd.Flags().IntVar(&maxWidthFlag, "max-width", 0, "Explicit maximum line width constraint (defaults to detected terminal width or 100)")
 	cmd.Flags().IntVarP(&headFlag, "head", "H", 0, "Extract first N logical data rows from table start")
 	cmd.Flags().IntVarP(&tailFlag, "tail", "T", 0, "Extract last N logical data rows from table end")
 	cmd.Flags().StringVarP(&indexFlag, "index", "i", "", "Target 0-based logical row index, list (0,2,4), range (2..10, 2:10), or stepped slice (0..20..2)")

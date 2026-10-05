@@ -232,7 +232,7 @@ def generate_expanded_frames():
             
     return frames, final_frame
 
-def export_media(frames, final_frame, mp4_paths, gif_paths, final_png_paths):
+def save_gif(frames, final_frame, output_paths, final_png_paths):
     temp_dir = tempfile.mkdtemp()
     try:
         # Save snapshot PNGs
@@ -246,23 +246,7 @@ def export_media(frames, final_frame, mp4_paths, gif_paths, final_png_paths):
             frame_path = os.path.join(temp_dir, f"frame_{idx:04d}.png")
             f.save(frame_path)
             
-        # 1. Export MP4 Video (H.264 / yuv420p)
-        for out_mp4 in mp4_paths:
-            os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
-            cmd_mp4 = [
-                "ffmpeg", "-y",
-                "-framerate", str(FPS),
-                "-i", os.path.join(temp_dir, "frame_%04d.png"),
-                "-c:v", "libx264",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                out_mp4
-            ]
-            subprocess.run(cmd_mp4, check=True)
-            size_kb = os.path.getsize(out_mp4) / 1024
-            print(f"Generated MP4 Video: {out_mp4} ({size_kb:.1f} KB, {len(frames)/FPS:.1f}s)")
-
-        # 2. Export Animated GIF
+        # Export Animated GIF
         palette_path = os.path.join(temp_dir, "palette.png")
         cmd_palette = [
             "ffmpeg", "-y",
@@ -294,10 +278,6 @@ if __name__ == "__main__":
     
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     
-    mp4_git = os.path.join(root_dir, "docs", "assets", "formatting-expanded.mp4")
-    mp4_dashboard = r"c:\work\dashboard\_resources\formatting-expanded.mp4"
-    mp4_artifact = r"C:\Users\pipik\.gemini\antigravity\brain\6816765f-9088-4183-826d-be7b3fb38627\formatting-expanded.mp4"
-    
     gif_git = os.path.join(root_dir, "docs", "assets", "formatting-expanded.gif")
     gif_dashboard = r"c:\work\dashboard\_resources\formatting-expanded.gif"
     gif_artifact = r"C:\Users\pipik\.gemini\antigravity\brain\6816765f-9088-4183-826d-be7b3fb38627\formatting-expanded.gif"
@@ -306,9 +286,9 @@ if __name__ == "__main__":
     png_dashboard = r"c:\work\dashboard\_resources\formatting-expanded-final.png"
     png_artifact = r"C:\Users\pipik\.gemini\antigravity\brain\6816765f-9088-4183-826d-be7b3fb38627\formatting-expanded-final.png"
 
-    export_media(
+    save_gif(
         frames, final_frame,
-        [mp4_git, mp4_dashboard, mp4_artifact],
         [gif_git, gif_dashboard, gif_artifact],
         [png_git, png_dashboard, png_artifact]
     )
+

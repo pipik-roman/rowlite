@@ -62,3 +62,8 @@ docker run --rm -v "$PWD:/vhs" ghcr.io/charmbracelet/vhs docs/demo/hero.tape
 ```bash
 gifsicle -O3 --lossy=80 docs/assets/rowlite-demo.gif -o docs/assets/rowlite-demo.gif
 ```
+
+## Media Formats & Repository Policy
+- **GIF Only**: All terminal recording scripts in `docs/demo/` must output exclusively to `.gif` (and optional static frame `.png` snapshots).
+- **No Video Formats**: Do not generate or check in `.mp4`, `.webm`, or other binary video container formats.
+

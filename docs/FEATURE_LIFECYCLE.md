@@ -15,19 +15,22 @@ This document establishes the development lifecycle and quality standards for co
 
 ---
 
-## 2. Dual Interface Exposure (CLI & MCP)
+## 2. Dual Interface Exposure: Asymmetric CLI vs. MCP Design
 
-Every capability must be exposed consistently across both interaction models:
+While core capabilities reside in `internal/core`, the CLI and MCP interfaces serve fundamentally different consumers and must be designed asymmetrically:
 
-### CLI ([`internal/cmd`](../internal/cmd))
+### CLI ([`internal/cmd`](../internal/cmd)) — Human & Shell Ergonomics
 * Provide clear Cobra command metadata (`Use`, `Short`, `Long`, `Example`).
-* Support standard output formats (`auto`, `json`, `csv`, `tsv`, `md`, `pretty`).
+* Support terminal rendering formats (`auto`, `json`, `csv`, `tsv`, `md`, `pretty`, `expanded`) and safety flags (`--dry-run`, `--all`, shorthand aliases).
 * Ensure JSON output uses raw characters (disable HTML entity escaping).
 
-### MCP Server ([`internal/cmd/mcp.go`](../internal/cmd/mcp.go))
-* Expose tools with strongly typed structs and comprehensive `jsonschema:"..."` field descriptions.
-* Integrate with `TableConfigCache`: leverage cache hits on read operations and invalidate cache entries on mutating actions.
-* Update [`server.json`](../server.json) (MCP Registry manifest) if tool definitions, arguments, or environment requirements change.
+### MCP Server ([`internal/cmd/mcp.go`](../internal/cmd/mcp.go)) — AI-First Minimal Schema Principle
+Every MCP tool schema and property description is injected into the LLM's context window on **every conversational turn**. To minimize the per-turn **Schema Tax**:
+* **No 1:1 CLI Flag Dumping**: Never copy human CLI flags (`--dry-run`, `--all`, backward-compatibility flag aliases like `--if-checksum`, terminal display options, or redundant pagination flags on mutation/count tools) into MCP tool structs. Expose only the parameters an AI agent genuinely uses.
+* **Shared Server Instructions over Per-Tool Duplication**: Place shared syntax conventions (such as `where` operators `==, !=, like, regex` and `sort` format `Col:asc|desc`) once in `mcp.ServerOptions.Instructions` rather than repeating them across every tool's description.
+* **Zero-Tag Self-Describing Properties**: Omit `jsonschema:"..."` description tags on self-explanatory field names (`file`, `columns`, `unique`, `limit`, `offset`, `row`, `set`). Add brief `jsonschema` format hints only when syntax is non-obvious.
+* **Cache Integration**: Leverage `TableConfigCache` hits on read operations and invalidate cache entries on mutating actions.
+* **Registry Sync**: Update [`server.json`](../server.json) if MCP Registry metadata or transport requirements change.
 
 ---
 
@@ -42,19 +45,21 @@ Every capability must be exposed consistently across both interaction models:
 ## 4. Performance, Benchmarking & Inefficiency Regression Checks
 
 * **Isolated Benchmark Files (`*_bench_test.go`)**:
-  - Place benchmarks strictly in `*_bench_test.go` files (e.g. [`large_table_bench_test.go`](../internal/core/large_table_bench_test.go)) so normal `go test ./...` test runs stay fast and clean.
+  - Place benchmarks strictly in `*_bench_test.go` files (e.g. [`large_table_bench_test.go`](../internal/core/large_table_bench_test.go), [`mcp_bench_test.go`](../internal/cmd/mcp_bench_test.go)) so normal `go test ./...` test runs stay fast and clean.
 * **Go 1.24+ `testing.B.Loop()` Mechanics**:
   - Use `for b.Loop() { ... }` for all benchmark loops.
   - For state-mutating benchmarks, use `b.StopTimer()` and `b.StartTimer()` around data reset logic.
 * **Dual Perspectives**:
   - Benchmark both **End-to-End (Cold / Disk-to-Result)** and **In-Memory (Hot / Query Engine / MCP Cache)** performance across the 10,000-row fixture.
+* **MCP Schema Size & Token Efficiency Benchmarks**:
+  - Whenever adding or modifying MCP tools in [`internal/cmd/mcp.go`](../internal/cmd/mcp.go), run both the Go schema size benchmark (`go test -bench=BenchmarkMCPSchemaSize ./internal/cmd`) and the Python token efficiency schema benchmark (`benchmarks/token_efficiency/benchmark_schema.py`) to compare total and per-tool token footprints (`cl100k_base`) against prior snapshots and prevent schema tax inflation.
 * **Mandatory Timestamped Snapshot Archiving (`benchmarks/`)**:
   - Whenever introducing a new feature, optimization, or core refactor, always execute benchmarks (`-count=3`) and save a timestamped snapshot: `benchmarks/YYYY-MM-DD_HHMMSS_<feature_name>.md`.
   - Update [`benchmarks/README.md`](../benchmarks/README.md) with the new entry and commit metadata.
 * **Performance Delta Auditing & Inefficiency Jump Checks**:
   - Compare new benchmark numbers against prior snapshot baselines.
   - Calculate relative latency speedup/slowdown ($\Delta\text{ns/op}$) and memory allocation deltas ($\Delta\text{B/op}$, $\Delta\text{allocs/op}$).
-  - **Inefficiency Guard**: Actively check for and reject unexpected performance regressions (e.g., unintended $O(N)$ allocations on $O(K)$ queries, memory leaks, or unbuffered full-table scans).
+  - **Inefficiency Guard**: Actively check for and reject unexpected performance regressions (e.g., unintended $O(N)$ allocations on $O(K)$ queries, memory leaks, unbuffered full-table scans, or >10% MCP schema token inflation).
 * **Update Documentation & Governance**:
   - Record the latest verified figures in [`BENCHMARKS.md`](../BENCHMARKS.md).
   - Update the ⚡ Performance summary table in [`README.md`](../README.md).

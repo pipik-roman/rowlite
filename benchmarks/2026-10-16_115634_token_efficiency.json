@@ -1,0 +1,802 @@
+{
+  "timestamp": "2026-10-16 11:56:34",
+  "model": "qwen3.8-27b",
+  "benchmarks": [
+    {
+      "scenario": "point_update",
+      "scenario_name": "Point Update by Key",
+      "num_rows": 50,
+      "baseline_whole": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 548,
+        "subsequent_prompt_tokens": 9566,
+        "total_prompt_tokens": 10114,
+        "visible_completion_tokens": 2868,
+        "reasoning_tokens": 150,
+        "total_completion_tokens": 3018,
+        "cached_tokens": 0,
+        "total_tokens": 13132,
+        "turns": 3,
+        "wall_clock_seconds": 38.252691300120205,
+        "verified": true,
+        "verification_message": "Task 2 successfully updated to Status State 'active'.",
+        "final_output": "\n\nDone. Task ID 2's Status State has been updated from `pending` to `active` in `table.md`.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 548,
+            "completion_tokens": 27,
+            "reasoning_tokens": 14,
+            "cached_tokens": 0,
+            "total_tokens": 589,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1569.267899962142
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3366,
+            "completion_tokens": 2814,
+            "reasoning_tokens": 28,
+            "cached_tokens": 0,
+            "total_tokens": 6208,
+            "tool_calls": [
+              "write_file"
+            ],
+            "tool_results_bytes": 26,
+            "latency_ms": 33069.19989991002
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 6200,
+            "completion_tokens": 27,
+            "reasoning_tokens": 108,
+            "cached_tokens": 0,
+            "total_tokens": 6335,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 3535.498899873346
+          }
+        ],
+        "context_growth_tokens": 9566,
+        "cognitive_ratio": 0.05
+      },
+      "baseline_grep": {
+        "condition": "baseline_grep_replace",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 850,
+        "subsequent_prompt_tokens": 7501,
+        "total_prompt_tokens": 8351,
+        "visible_completion_tokens": 194,
+        "reasoning_tokens": 244,
+        "total_completion_tokens": 438,
+        "cached_tokens": 0,
+        "total_tokens": 8789,
+        "turns": 3,
+        "wall_clock_seconds": 7.094768600072712,
+        "verified": true,
+        "verification_message": "Task 2 successfully updated to Status State 'active'.",
+        "final_output": "\n\nDone. The Status State for Task ID 2 has been updated from `pending` to `active`.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 850,
+            "completion_tokens": 27,
+            "reasoning_tokens": 43,
+            "cached_tokens": 0,
+            "total_tokens": 920,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1524.7648998629302
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3668,
+            "completion_tokens": 144,
+            "reasoning_tokens": 79,
+            "cached_tokens": 0,
+            "total_tokens": 3891,
+            "tool_calls": [
+              "replace_file_content"
+            ],
+            "tool_results_bytes": 35,
+            "latency_ms": 3029.272299958393
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 3833,
+            "completion_tokens": 23,
+            "reasoning_tokens": 122,
+            "cached_tokens": 0,
+            "total_tokens": 3978,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 2526.7620999366045
+          }
+        ],
+        "context_growth_tokens": 7501,
+        "cognitive_ratio": 1.26
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 1262,
+        "subsequent_prompt_tokens": 1348,
+        "total_prompt_tokens": 2610,
+        "visible_completion_tokens": 85,
+        "reasoning_tokens": 105,
+        "total_completion_tokens": 190,
+        "cached_tokens": 0,
+        "total_tokens": 2800,
+        "turns": 2,
+        "wall_clock_seconds": 4.082854999927804,
+        "verified": true,
+        "verification_message": "Task 2 successfully updated to Status State 'active'.",
+        "final_output": "\n\nDone. Task ID 2's Status State has been updated from 'pending' to 'active'.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 1262,
+            "completion_tokens": 63,
+            "reasoning_tokens": 31,
+            "cached_tokens": 0,
+            "total_tokens": 1356,
+            "tool_calls": [
+              "rowlite_update"
+            ],
+            "tool_results_bytes": 29,
+            "latency_ms": 1529.298699926585
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 1348,
+            "completion_tokens": 22,
+            "reasoning_tokens": 74,
+            "cached_tokens": 0,
+            "total_tokens": 1444,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 2525.8600001689047
+          }
+        ],
+        "context_growth_tokens": 1348,
+        "cognitive_ratio": 1.24
+      },
+      "savings_vs_whole_pct": 78.67803837953092,
+      "savings_vs_grep_pct": 68.1419956764137
+    },
+    {
+      "scenario": "batch_update",
+      "scenario_name": "Batch Conditional Update",
+      "num_rows": 50,
+      "baseline_whole": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 552,
+        "subsequent_prompt_tokens": 9583,
+        "total_prompt_tokens": 10135,
+        "visible_completion_tokens": 2880,
+        "reasoning_tokens": 250,
+        "total_completion_tokens": 3130,
+        "cached_tokens": 0,
+        "total_tokens": 13265,
+        "turns": 3,
+        "wall_clock_seconds": 39.142467400059104,
+        "verified": true,
+        "verification_message": "All 11 rows matching Priority Level='high' have Status State='in_progress'.",
+        "final_output": "\n\nUpdated all rows with `Priority Level` = `high` to set `Status State` = `in_progress` in `table.md`.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 552,
+            "completion_tokens": 27,
+            "reasoning_tokens": 17,
+            "cached_tokens": 0,
+            "total_tokens": 596,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1526.900399941951
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3370,
+            "completion_tokens": 2823,
+            "reasoning_tokens": 219,
+            "cached_tokens": 0,
+            "total_tokens": 6412,
+            "tool_calls": [
+              "write_file"
+            ],
+            "tool_results_bytes": 26,
+            "latency_ms": 35076.01139997132
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 6213,
+            "completion_tokens": 30,
+            "reasoning_tokens": 14,
+            "cached_tokens": 0,
+            "total_tokens": 6257,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 2526.835999917239
+          }
+        ],
+        "context_growth_tokens": 9583,
+        "cognitive_ratio": 0.09
+      },
+      "baseline_grep": {
+        "condition": "baseline_grep_replace",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 854,
+        "subsequent_prompt_tokens": 8896,
+        "total_prompt_tokens": 9750,
+        "visible_completion_tokens": 1557,
+        "reasoning_tokens": 337,
+        "total_completion_tokens": 1894,
+        "cached_tokens": 0,
+        "total_tokens": 11644,
+        "turns": 3,
+        "wall_clock_seconds": 23.135449199937284,
+        "verified": true,
+        "verification_message": "All 11 rows matching Priority Level='high' have Status State='in_progress'.",
+        "final_output": "\n\nDone. Updated all 9 high-priority tasks that weren't already `in_progress` (rows 7, 11, 15, 19, 27, 31, 35, 39, 47). Rows 3, 23, and 43 were already `in_progress` and left unchanged.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 854,
+            "completion_tokens": 27,
+            "reasoning_tokens": 15,
+            "cached_tokens": 0,
+            "total_tokens": 896,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1524.7734999284148
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3672,
+            "completion_tokens": 1451,
+            "reasoning_tokens": 286,
+            "cached_tokens": 0,
+            "total_tokens": 5409,
+            "tool_calls": [
+              "replace_file_content",
+              "replace_file_content",
+              "replace_file_content",
+              "replace_file_content",
+              "replace_file_content",
+              "replace_file_content",
+              "replace_file_content",
+              "replace_file_content",
+              "replace_file_content"
+            ],
+            "tool_results_bytes": 315,
+            "latency_ms": 19054.849699838087
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 5224,
+            "completion_tokens": 79,
+            "reasoning_tokens": 36,
+            "cached_tokens": 0,
+            "total_tokens": 5339,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 2529.8770999070257
+          }
+        ],
+        "context_growth_tokens": 8896,
+        "cognitive_ratio": 0.22
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 1266,
+        "subsequent_prompt_tokens": 1353,
+        "total_prompt_tokens": 2619,
+        "visible_completion_tokens": 91,
+        "reasoning_tokens": 69,
+        "total_completion_tokens": 160,
+        "cached_tokens": 0,
+        "total_tokens": 2779,
+        "turns": 2,
+        "wall_clock_seconds": 3.582085199886933,
+        "verified": true,
+        "verification_message": "All 11 rows matching Priority Level='high' have Status State='in_progress'.",
+        "final_output": "\n\nDone. Updated 12 rows where **Priority Level** is `high`, setting **Status State** to `in_progress`.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 1266,
+            "completion_tokens": 63,
+            "reasoning_tokens": 41,
+            "cached_tokens": 0,
+            "total_tokens": 1370,
+            "tool_calls": [
+              "rowlite_update"
+            ],
+            "tool_results_bytes": 30,
+            "latency_ms": 2027.1318000741303
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 1353,
+            "completion_tokens": 28,
+            "reasoning_tokens": 28,
+            "cached_tokens": 0,
+            "total_tokens": 1409,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 1526.8868000712246
+          }
+        ],
+        "context_growth_tokens": 1353,
+        "cognitive_ratio": 0.76
+      },
+      "savings_vs_whole_pct": 79.05013192612137,
+      "savings_vs_grep_pct": 76.13363105462041
+    },
+    {
+      "scenario": "append",
+      "scenario_name": "Auto-Increment Append",
+      "num_rows": 50,
+      "baseline_whole": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 566,
+        "subsequent_prompt_tokens": 9649,
+        "total_prompt_tokens": 10215,
+        "visible_completion_tokens": 2910,
+        "reasoning_tokens": 297,
+        "total_completion_tokens": 3207,
+        "cached_tokens": 0,
+        "total_tokens": 13422,
+        "turns": 3,
+        "wall_clock_seconds": 42.65145900007337,
+        "verified": true,
+        "verification_message": "Appended row found with Task ID '51' and Created At '2026-02-24 00:51:57'.",
+        "final_output": "\n\nAppended the new task as row 51 in `table.md` with the specified fields.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 566,
+            "completion_tokens": 27,
+            "reasoning_tokens": 15,
+            "cached_tokens": 0,
+            "total_tokens": 608,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1529.4915998820215
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3384,
+            "completion_tokens": 2861,
+            "reasoning_tokens": 237,
+            "cached_tokens": 0,
+            "total_tokens": 6482,
+            "tool_calls": [
+              "write_file"
+            ],
+            "tool_results_bytes": 26,
+            "latency_ms": 37078.81720014848
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 6265,
+            "completion_tokens": 22,
+            "reasoning_tokens": 45,
+            "cached_tokens": 0,
+            "total_tokens": 6332,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 4031.262499978766
+          }
+        ],
+        "context_growth_tokens": 9649,
+        "cognitive_ratio": 0.1
+      },
+      "baseline_grep": {
+        "condition": "baseline_grep_replace",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 868,
+        "subsequent_prompt_tokens": 7594,
+        "total_prompt_tokens": 8462,
+        "visible_completion_tokens": 269,
+        "reasoning_tokens": 181,
+        "total_completion_tokens": 450,
+        "cached_tokens": 0,
+        "total_tokens": 8912,
+        "turns": 3,
+        "wall_clock_seconds": 9.599185799947008,
+        "verified": true,
+        "verification_message": "Appended row found with Task ID '51' and Created At '2026-02-24 00:51:57'.",
+        "final_output": "\n\nAppended the new task as row 51: `Deploy OAuth2 gateway` in `DevOps & CI/CD`, priority `high`, status `active`, score `99`.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 868,
+            "completion_tokens": 27,
+            "reasoning_tokens": 15,
+            "cached_tokens": 0,
+            "total_tokens": 910,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1026.3805999420583
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3686,
+            "completion_tokens": 201,
+            "reasoning_tokens": 103,
+            "cached_tokens": 0,
+            "total_tokens": 3990,
+            "tool_calls": [
+              "replace_file_content"
+            ],
+            "tool_results_bytes": 35,
+            "latency_ms": 5532.939499942586
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 3908,
+            "completion_tokens": 41,
+            "reasoning_tokens": 63,
+            "cached_tokens": 0,
+            "total_tokens": 4012,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 3027.3094000294805
+          }
+        ],
+        "context_growth_tokens": 7594,
+        "cognitive_ratio": 0.67
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 1280,
+        "subsequent_prompt_tokens": 2937,
+        "total_prompt_tokens": 4217,
+        "visible_completion_tokens": 158,
+        "reasoning_tokens": 223,
+        "total_completion_tokens": 381,
+        "cached_tokens": 0,
+        "total_tokens": 4598,
+        "turns": 3,
+        "wall_clock_seconds": 7.1173825999721885,
+        "verified": true,
+        "verification_message": "Appended row found with Task ID '51' and Created At '2026-10-16 11:56:14'.",
+        "final_output": "\n\nDone. A new task row has been appended to `table.md` with Description \"Deploy OAuth2 gateway\", Category \"DevOps & CI/CD\", Priority \"high\", Status \"active\", and Score \"99\".",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 1280,
+            "completion_tokens": 29,
+            "reasoning_tokens": 36,
+            "cached_tokens": 0,
+            "total_tokens": 1345,
+            "tool_calls": [
+              "rowlite_get_structure"
+            ],
+            "tool_results_bytes": 300,
+            "latency_ms": 1537.0613001286983
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 1418,
+            "completion_tokens": 82,
+            "reasoning_tokens": 169,
+            "cached_tokens": 0,
+            "total_tokens": 1669,
+            "tool_calls": [
+              "rowlite_append"
+            ],
+            "tool_results_bytes": 25,
+            "latency_ms": 3526.5921000391245
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 1519,
+            "completion_tokens": 47,
+            "reasoning_tokens": 18,
+            "cached_tokens": 0,
+            "total_tokens": 1584,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 2025.0106998719275
+          }
+        ],
+        "context_growth_tokens": 2937,
+        "cognitive_ratio": 1.41
+      },
+      "savings_vs_whole_pct": 65.742810311429,
+      "savings_vs_grep_pct": 48.40664272890485
+    },
+    {
+      "scenario": "query",
+      "scenario_name": "Bounded Slicing Query",
+      "num_rows": 50,
+      "baseline_whole": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 546,
+        "subsequent_prompt_tokens": 3364,
+        "total_prompt_tokens": 3910,
+        "visible_completion_tokens": 119,
+        "reasoning_tokens": 242,
+        "total_completion_tokens": 361,
+        "cached_tokens": 0,
+        "total_tokens": 4271,
+        "turns": 2,
+        "wall_clock_seconds": 6.06612140010111,
+        "verified": true,
+        "verification_message": "Table intact with 40 rows.",
+        "final_output": "\n\nThe first 3 tasks in the **Security & Auth** category (by Task ID) are:\n\n1. **Task 4** \u2013 Resolve memory leak in worker pool \u26a0\ufe0f\n2. **Task 11** \u2013 Special Tag #11 | Caf\u00e9 ordering workflow with {\"retry\": true, \"limit\": 5}\n3. **Task 18** \u2013 Resolve memory leak in worker pool \u26a0\ufe0f",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 546,
+            "completion_tokens": 27,
+            "reasoning_tokens": 33,
+            "cached_tokens": 0,
+            "total_tokens": 606,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1025.5745998583734
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3364,
+            "completion_tokens": 92,
+            "reasoning_tokens": 209,
+            "cached_tokens": 0,
+            "total_tokens": 3665,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 5029.733699979261
+          }
+        ],
+        "context_growth_tokens": 3364,
+        "cognitive_ratio": 2.03
+      },
+      "baseline_grep": {
+        "condition": "baseline_grep_replace",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 848,
+        "subsequent_prompt_tokens": 3666,
+        "total_prompt_tokens": 4514,
+        "visible_completion_tokens": 119,
+        "reasoning_tokens": 119,
+        "total_completion_tokens": 238,
+        "cached_tokens": 0,
+        "total_tokens": 4752,
+        "turns": 2,
+        "wall_clock_seconds": 5.065729700028896,
+        "verified": true,
+        "verification_message": "Table intact with 40 rows.",
+        "final_output": "\n\nThe first 3 tasks in the **Security & Auth** category (by Task ID) are:\n\n1. **Task 4** \u2013 Resolve memory leak in worker pool \u26a0\ufe0f\n2. **Task 11** \u2013 Special Tag #11 | Caf\u00e9 ordering workflow with {\"retry\": true, \"limit\": 5}\n3. **Task 18** \u2013 Resolve memory leak in worker pool \u26a0\ufe0f",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 848,
+            "completion_tokens": 27,
+            "reasoning_tokens": 33,
+            "cached_tokens": 0,
+            "total_tokens": 908,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 6400,
+            "latency_ms": 1525.5951001308858
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 3666,
+            "completion_tokens": 92,
+            "reasoning_tokens": 86,
+            "cached_tokens": 0,
+            "total_tokens": 3844,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 3529.4002001173794
+          }
+        ],
+        "context_growth_tokens": 3666,
+        "cognitive_ratio": 1.0
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 50,
+        "turn1_prompt_tokens": 1260,
+        "subsequent_prompt_tokens": 4660,
+        "total_prompt_tokens": 5920,
+        "visible_completion_tokens": 262,
+        "reasoning_tokens": 125,
+        "total_completion_tokens": 387,
+        "cached_tokens": 0,
+        "total_tokens": 6307,
+        "turns": 4,
+        "wall_clock_seconds": 7.112537699984387,
+        "verified": true,
+        "verification_message": "Table intact with 40 rows.",
+        "final_output": "\n\nHere are the first 3 tasks in the **Security & Auth** category:\n\n| Task ID | Task Description | Priority Level | Status State |\n| --- | --- | --- | --- |\n| 4 | Resolve memory leak in worker pool \u26a0\ufe0f | critical | done |\n| 11 | Special Tag #11 \\| Caf\u00e9 ordering workflow with {\"retry\": true, \"limit\": 5} | high | active |\n| 18 | Resolve memory leak in worker pool \u26a0\ufe0f | medium | in_progress |",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 1260,
+            "completion_tokens": 58,
+            "reasoning_tokens": 44,
+            "cached_tokens": 0,
+            "total_tokens": 1362,
+            "tool_calls": [
+              "rowlite_list"
+            ],
+            "tool_results_bytes": 158,
+            "latency_ms": 2025.887800147757
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 1369,
+            "completion_tokens": 29,
+            "reasoning_tokens": 9,
+            "cached_tokens": 0,
+            "total_tokens": 1407,
+            "tool_calls": [
+              "rowlite_get_structure"
+            ],
+            "tool_results_bytes": 300,
+            "latency_ms": 1023.5834999475628
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 1507,
+            "completion_tokens": 59,
+            "reasoning_tokens": 22,
+            "cached_tokens": 0,
+            "total_tokens": 1588,
+            "tool_calls": [
+              "rowlite_list"
+            ],
+            "tool_results_bytes": 532,
+            "latency_ms": 1524.371099891141
+          },
+          {
+            "turn_number": 4,
+            "prompt_tokens": 1784,
+            "completion_tokens": 116,
+            "reasoning_tokens": 50,
+            "cached_tokens": 0,
+            "total_tokens": 1950,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 2524.7666998766363
+          }
+        ],
+        "context_growth_tokens": 4660,
+        "cognitive_ratio": 0.48
+      },
+      "savings_vs_whole_pct": -47.67033481620229,
+      "savings_vs_grep_pct": -32.72306397306397
+    }
+  ],
+  "schema_data": {
+    "timestamp": "2026-10-16T11:53:21.081258",
+    "total_tools": 8,
+    "total_properties": 22,
+    "total_bytes": 2928,
+    "total_tokens": 811,
+    "tools": {
+      "rowlite_append": {
+        "name": "rowlite_append",
+        "description": "Append a row to a Markdown table",
+        "properties_count": 2,
+        "properties": [
+          "file",
+          "row"
+        ],
+        "bytes": 320,
+        "tokens": 85
+      },
+      "rowlite_count": {
+        "name": "rowlite_count",
+        "description": "Count matching rows in a Markdown table",
+        "properties_count": 2,
+        "properties": [
+          "file",
+          "where"
+        ],
+        "bytes": 315,
+        "tokens": 84
+      },
+      "rowlite_delete": {
+        "name": "rowlite_delete",
+        "description": "Delete matching rows from a Markdown table",
+        "properties_count": 3,
+        "properties": [
+          "file",
+          "where",
+          "index"
+        ],
+        "bytes": 388,
+        "tokens": 110
+      },
+      "rowlite_get_structure": {
+        "name": "rowlite_get_structure",
+        "description": "Inspect table columns and constraints",
+        "properties_count": 1,
+        "properties": [
+          "file"
+        ],
+        "bytes": 254,
+        "tokens": 62
+      },
+      "rowlite_init": {
+        "name": "rowlite_init",
+        "description": "Initialize table columns and constraints",
+        "properties_count": 4,
+        "properties": [
+          "file",
+          "columns",
+          "unique",
+          "sort"
+        ],
+        "bytes": 443,
+        "tokens": 125
+      },
+      "rowlite_list": {
+        "name": "rowlite_list",
+        "description": "Query rows from a Markdown table",
+        "properties_count": 4,
+        "properties": [
+          "file",
+          "where",
+          "limit",
+          "offset"
+        ],
+        "bytes": 439,
+        "tokens": 123
+      },
+      "rowlite_sort": {
+        "name": "rowlite_sort",
+        "description": "Sort table rows in-place",
+        "properties_count": 2,
+        "properties": [
+          "file",
+          "by"
+        ],
+        "bytes": 289,
+        "tokens": 81
+      },
+      "rowlite_update": {
+        "name": "rowlite_update",
+        "description": "Update matching rows in a Markdown table",
+        "properties_count": 4,
+        "properties": [
+          "file",
+          "where",
+          "index",
+          "set"
+        ],
+        "bytes": 464,
+        "tokens": 132
+      }
+    }
+  }
+}

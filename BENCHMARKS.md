@@ -67,3 +67,9 @@ Run the automated Go benchmark suite:
 # Run all large-table benchmarks with memory profiling excluding unit tests
 go test -bench=BenchmarkLargeTable -benchmem -run=^$ ./internal/core/...
 ```
+
+---
+
+## 3. LLM Token Efficiency & Context Saturation Benchmarks
+
+To measure LLM token consumption, schema tax, and context saturation when AI agents interact with Markdown tables via whole-file filesystem tools versus Rowlite MCP, see the [LLM Token Efficiency Benchmark Suite](benchmarks/token_efficiency/README.md) and the latest [Snapshot Report](benchmarks/token_efficiency/REPORT.md).

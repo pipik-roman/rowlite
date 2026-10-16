@@ -277,11 +277,6 @@ if __name__ == "__main__":
     
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     out_git = os.path.join(root_dir, "docs", "assets", "formatting-original-current.gif")
-    out_dashboard = r"c:\work\dashboard\_resources\formatting-original-current.gif"
-    out_artifact = r"C:\Users\pipik\.gemini\antigravity\brain\6816765f-9088-4183-826d-be7b3fb38627\formatting-original-current.gif"
-    
     png_git = os.path.join(root_dir, "docs", "assets", "formatting-original-current-final.png")
-    png_dashboard = r"c:\work\dashboard\_resources\formatting-original-current-final.png"
-    png_artifact = r"C:\Users\pipik\.gemini\antigravity\brain\6816765f-9088-4183-826d-be7b3fb38627\formatting-original-current-final.png"
 
-    save_gif(frames, final_frame, [out_git, out_dashboard, out_artifact], [png_git, png_dashboard, png_artifact])
+    save_gif(frames, final_frame, [out_git], [png_git])

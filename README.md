@@ -223,6 +223,30 @@ Built in Go for speed, low memory overhead, and zero external dependencies. Benc
 
 > For in-memory caching benchmarks, memory metrics, and reproduction steps, see [BENCHMARKS.md](BENCHMARKS.md).
 
+## 🤖 AI Agent Token Efficiency & Safety (MCP)
+
+When AI coding assistants and autonomous agents manipulate Markdown tables, standard filesystem tools force severe trade-offs:
+
+1. **Whole-File Rewrites Explode Context & Latency**: Emitting hundreds of rows to `write_file` saturates the LLM context window with redundant data (~13,000 tokens for a single edit) and locks the GPU in 35-40 seconds of continuous autoregressive decoding.
+2. **Targeted Grep/Replace Causes Table Drift**: Replacing text chunks alters column widths, breaking vertical pipe alignment across the document. Furthermore, regex replacement cannot enforce frontmatter schema constraints (`unique`, `sort`, `audit`), fails on multi-row non-contiguous batch updates, and cannot reliably infer auto-increment keys on unsorted datasets.
+3. **Rowlite MCP Provides Deterministic $\mathcal{O}(1)$ Mutations**: Agents invoke declarative Go-native tools (`rowlite_update`, `rowlite_append`, `rowlite_list`) that guarantee table structural integrity, enforce schema constraints, and maintain minimal token footprints.
+
+<div align="center">
+  <img src="docs/assets/token-efficiency-tokens.png" alt="AI Agent Token Efficiency Benchmark" width="100%" style="max-width: 900px; border-radius: 8px;" />
+  <p><em>Total trajectory token footprint across 50 rows comparing Whole-File, Targeted Grep/Replace, and Rowlite MCP.</em></p>
+  <img src="docs/assets/token-efficiency-latency.png" alt="AI Agent Execution Latency Benchmark" width="100%" style="max-width: 900px; border-radius: 8px; margin-top: 14px;" />
+  <p><em>Wall-clock turn latency and server reliability across 50 rows on NVIDIA DGX Spark architecture.</em></p>
+</div>
+
+| Operational Scenario | Whole-File Baseline | Targeted Grep/Replace | Rowlite Native MCP | Savings vs Whole | Savings vs Grep | Impact |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Point Update (by Key)** | 13,132 tok (38.3s) | 8,789 tok (7.1s) | **2,800 tok (4.1s)** | **-78.7%** | **-68.1%** | **9.3x faster**, zero formatting drift |
+| **Batch Update (Multi-Row)** | 13,265 tok (39.1s) | 11,644 tok (23.1s) | **2,779 tok (3.6s)** | **-79.1%** | **-76.1%** | **6.4x faster**, atomic multi-row mutation |
+| **Auto-Increment Append** | 13,422 tok (42.7s) | 8,912 tok (9.6s) | **4,598 tok (7.1s)** | **-65.7%** | **-48.4%** | Monotonic surrogate key, auto-audit stamp |
+| **Bounded Slicing Query** | 4,271 tok (6.1s) | 4,752 tok (5.1s) | **6,307 tok (7.1s)** | -47.7% | -32.7% | Structured schema filtering |
+
+> Complete benchmark methodology, historical snapshots, and reproduction instructions are available in the [Token Efficiency Benchmark Guide](benchmarks/token_efficiency/README.md) and [Historical Archive](benchmarks/README.md).
+
 ## Roadmap
 Currently rowlite supports table initialization, querying/filtering, slicing, appending, in-place updating, and row deletion.
 

@@ -279,16 +279,11 @@ if __name__ == "__main__":
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     
     gif_git = os.path.join(root_dir, "docs", "assets", "formatting-expanded.gif")
-    gif_dashboard = r"c:\work\dashboard\_resources\formatting-expanded.gif"
-    gif_artifact = r"C:\Users\pipik\.gemini\antigravity\brain\6816765f-9088-4183-826d-be7b3fb38627\formatting-expanded.gif"
-    
     png_git = os.path.join(root_dir, "docs", "assets", "formatting-expanded-final.png")
-    png_dashboard = r"c:\work\dashboard\_resources\formatting-expanded-final.png"
-    png_artifact = r"C:\Users\pipik\.gemini\antigravity\brain\6816765f-9088-4183-826d-be7b3fb38627\formatting-expanded-final.png"
 
     save_gif(
         frames, final_frame,
-        [gif_git, gif_dashboard, gif_artifact],
-        [png_git, png_dashboard, png_artifact]
+        [gif_git],
+        [png_git]
     )
 

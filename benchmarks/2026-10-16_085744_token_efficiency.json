@@ -1,0 +1,94 @@
+{
+  "timestamp": "2026-10-16 08:57:44",
+  "model": "qwen3.8-27b",
+  "benchmarks": [
+    {
+      "scenario": "point_update",
+      "scenario_name": "Point Update\n(by Key)",
+      "num_rows": 50,
+      "baseline_whole": {
+        "total_tokens": 3129,
+        "wall_clock_seconds": 32.17,
+        "verified": false
+      },
+      "baseline_grep": {
+        "total_tokens": 8584,
+        "wall_clock_seconds": 6.15,
+        "verified": true
+      },
+      "rowlite": {
+        "total_tokens": 2769,
+        "wall_clock_seconds": 4.07,
+        "verified": true
+      },
+      "savings_vs_grep_pct": 67.7,
+      "savings_vs_whole_pct": 11.5
+    },
+    {
+      "scenario": "batch_update",
+      "scenario_name": "Batch Update\n(Multi-Row)",
+      "num_rows": 50,
+      "baseline_whole": {
+        "total_tokens": 3142,
+        "wall_clock_seconds": 32.11,
+        "verified": false
+      },
+      "baseline_grep": {
+        "total_tokens": 11737,
+        "wall_clock_seconds": 23.66,
+        "verified": true
+      },
+      "rowlite": {
+        "total_tokens": 2751,
+        "wall_clock_seconds": 3.09,
+        "verified": true
+      },
+      "savings_vs_grep_pct": 76.6,
+      "savings_vs_whole_pct": 12.4
+    },
+    {
+      "scenario": "append",
+      "scenario_name": "Auto-Increment\nAppend",
+      "num_rows": 50,
+      "baseline_whole": {
+        "total_tokens": 3167,
+        "wall_clock_seconds": 33.14,
+        "verified": false
+      },
+      "baseline_grep": {
+        "total_tokens": 8922,
+        "wall_clock_seconds": 9.63,
+        "verified": true
+      },
+      "rowlite": {
+        "total_tokens": 4522,
+        "wall_clock_seconds": 6.64,
+        "verified": true
+      },
+      "savings_vs_grep_pct": 49.3,
+      "savings_vs_whole_pct": -42.8
+    },
+    {
+      "scenario": "query",
+      "scenario_name": "Bounded Slicing\nQuery",
+      "num_rows": 50,
+      "baseline_whole": {
+        "total_tokens": 4243,
+        "wall_clock_seconds": 6.57,
+        "verified": true
+      },
+      "baseline_grep": {
+        "total_tokens": 4747,
+        "wall_clock_seconds": 5.06,
+        "verified": true
+      },
+      "rowlite": {
+        "total_tokens": 4593,
+        "wall_clock_seconds": 6.09,
+        "verified": true
+      },
+      "savings_vs_grep_pct": 3.2,
+      "savings_vs_whole_pct": -8.2
+    }
+  ]
+}

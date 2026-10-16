@@ -28,3 +28,8 @@ rowlite.exe
 
 # Media / video
 *.mp4
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

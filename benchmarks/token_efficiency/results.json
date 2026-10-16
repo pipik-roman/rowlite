@@ -1,0 +1,434 @@
+{
+  "timestamp": "2026-10-05T14:19:42.199842",
+  "model": "Deterministic Simulation (tiktoken cl100k_base)",
+  "simulated": true,
+  "benchmarks": [
+    {
+      "scenario": "point_update",
+      "num_rows": 100,
+      "baseline": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 250,
+        "subsequent_prompt_tokens": 14447,
+        "total_prompt_tokens": 14697,
+        "visible_completion_tokens": 5379,
+        "reasoning_tokens": 468,
+        "total_completion_tokens": 5847,
+        "cached_tokens": 0,
+        "total_tokens": 20544,
+        "turns": 3,
+        "wall_clock_seconds": 0.03363989992067218,
+        "verified": true,
+        "verification_message": "Task 2 successfully updated to Status State 'active'.",
+        "final_output": "Task ID 2 Status State updated to active.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 250,
+            "completion_tokens": 27,
+            "reasoning_tokens": 45,
+            "cached_tokens": 0,
+            "total_tokens": 322,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 12532,
+            "latency_ms": 19.39089992083609
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 4694,
+            "completion_tokens": 5342,
+            "reasoning_tokens": 398,
+            "cached_tokens": 0,
+            "total_tokens": 10434,
+            "tool_calls": [
+              "write_file"
+            ],
+            "tool_results_bytes": 26,
+            "latency_ms": 8.76489991787821
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 9753,
+            "completion_tokens": 10,
+            "reasoning_tokens": 25,
+            "cached_tokens": 0,
+            "total_tokens": 9788,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 5.451900069601834
+          }
+        ],
+        "context_growth_tokens": 14447,
+        "cognitive_ratio": 0.09
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 2246,
+        "subsequent_prompt_tokens": 2299,
+        "total_prompt_tokens": 4545,
+        "visible_completion_tokens": 63,
+        "reasoning_tokens": 75,
+        "total_completion_tokens": 138,
+        "cached_tokens": 0,
+        "total_tokens": 4683,
+        "turns": 2,
+        "wall_clock_seconds": 0.018031299929134548,
+        "verified": true,
+        "verification_message": "Task 2 successfully updated to Status State 'active'.",
+        "final_output": "Operation 'point_update' completed successfully via Rowlite.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 2246,
+            "completion_tokens": 51,
+            "reasoning_tokens": 55,
+            "cached_tokens": 0,
+            "total_tokens": 2352,
+            "tool_calls": [
+              "rowlite_update"
+            ],
+            "tool_results_bytes": 29,
+            "latency_ms": 16.67829998768866
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 2299,
+            "completion_tokens": 12,
+            "reasoning_tokens": 20,
+            "cached_tokens": 0,
+            "total_tokens": 2331,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 1.334700034931302
+          }
+        ],
+        "context_growth_tokens": 2299,
+        "cognitive_ratio": 1.19
+      },
+      "token_savings_pct": 77.20502336448598
+    },
+    {
+      "scenario": "batch_update",
+      "num_rows": 100,
+      "baseline": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 254,
+        "subsequent_prompt_tokens": 14471,
+        "total_prompt_tokens": 14725,
+        "visible_completion_tokens": 5394,
+        "reasoning_tokens": 652,
+        "total_completion_tokens": 6046,
+        "cached_tokens": 0,
+        "total_tokens": 20771,
+        "turns": 3,
+        "wall_clock_seconds": 0.008969399961642921,
+        "verified": true,
+        "verification_message": "All 22 rows matching Priority Level='high' have Status State='in_progress'.",
+        "final_output": "All high priority tasks set to in_progress.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 254,
+            "completion_tokens": 27,
+            "reasoning_tokens": 45,
+            "cached_tokens": 0,
+            "total_tokens": 326,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 12532,
+            "latency_ms": 0.7670000195503235
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 4698,
+            "completion_tokens": 5358,
+            "reasoning_tokens": 577,
+            "cached_tokens": 0,
+            "total_tokens": 10633,
+            "tool_calls": [
+              "write_file"
+            ],
+            "tool_results_bytes": 26,
+            "latency_ms": 4.479299997910857
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 9773,
+            "completion_tokens": 9,
+            "reasoning_tokens": 30,
+            "cached_tokens": 0,
+            "total_tokens": 9812,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 3.701500012539327
+          }
+        ],
+        "context_growth_tokens": 14471,
+        "cognitive_ratio": 0.12
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 2250,
+        "subsequent_prompt_tokens": 2303,
+        "total_prompt_tokens": 4553,
+        "visible_completion_tokens": 63,
+        "reasoning_tokens": 80,
+        "total_completion_tokens": 143,
+        "cached_tokens": 0,
+        "total_tokens": 4696,
+        "turns": 2,
+        "wall_clock_seconds": 0.019022799911908805,
+        "verified": true,
+        "verification_message": "All 22 rows matching Priority Level='high' have Status State='in_progress'.",
+        "final_output": "Operation 'batch_update' completed successfully via Rowlite.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 2250,
+            "completion_tokens": 51,
+            "reasoning_tokens": 60,
+            "cached_tokens": 0,
+            "total_tokens": 2361,
+            "tool_calls": [
+              "rowlite_update"
+            ],
+            "tool_results_bytes": 30,
+            "latency_ms": 17.562200082466006
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 2303,
+            "completion_tokens": 12,
+            "reasoning_tokens": 20,
+            "cached_tokens": 0,
+            "total_tokens": 2335,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 1.4173999661579728
+          }
+        ],
+        "context_growth_tokens": 2303,
+        "cognitive_ratio": 1.27
+      },
+      "token_savings_pct": 77.3915555341582
+    },
+    {
+      "scenario": "append",
+      "num_rows": 100,
+      "baseline": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 267,
+        "subsequent_prompt_tokens": 14518,
+        "total_prompt_tokens": 14785,
+        "visible_completion_tokens": 5417,
+        "reasoning_tokens": 448,
+        "total_completion_tokens": 5865,
+        "cached_tokens": 0,
+        "total_tokens": 20650,
+        "turns": 3,
+        "wall_clock_seconds": 0.008886100025847554,
+        "verified": true,
+        "verification_message": "Appended row found with Task ID '101' and Created At '2026-10-05 12:00:00'.",
+        "final_output": "Appended new task with Task ID 101.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 267,
+            "completion_tokens": 27,
+            "reasoning_tokens": 45,
+            "cached_tokens": 0,
+            "total_tokens": 339,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 12532,
+            "latency_ms": 0.7480999920517206
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 4711,
+            "completion_tokens": 5380,
+            "reasoning_tokens": 378,
+            "cached_tokens": 0,
+            "total_tokens": 10469,
+            "tool_calls": [
+              "write_file"
+            ],
+            "tool_results_bytes": 26,
+            "latency_ms": 4.404500010423362
+          },
+          {
+            "turn_number": 3,
+            "prompt_tokens": 9807,
+            "completion_tokens": 10,
+            "reasoning_tokens": 25,
+            "cached_tokens": 0,
+            "total_tokens": 9842,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 3.710700082592666
+          }
+        ],
+        "context_growth_tokens": 14518,
+        "cognitive_ratio": 0.08
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 2263,
+        "subsequent_prompt_tokens": 2338,
+        "total_prompt_tokens": 4601,
+        "visible_completion_tokens": 86,
+        "reasoning_tokens": 70,
+        "total_completion_tokens": 156,
+        "cached_tokens": 0,
+        "total_tokens": 4757,
+        "turns": 2,
+        "wall_clock_seconds": 0.017886799992993474,
+        "verified": true,
+        "verification_message": "Appended row found with Task ID '101' and Created At '2026-10-05 14:19:42'.",
+        "final_output": "Operation 'append' completed successfully via Rowlite.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 2263,
+            "completion_tokens": 75,
+            "reasoning_tokens": 50,
+            "cached_tokens": 0,
+            "total_tokens": 2388,
+            "tool_calls": [
+              "rowlite_append"
+            ],
+            "tool_results_bytes": 25,
+            "latency_ms": 16.745699918828905
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 2338,
+            "completion_tokens": 11,
+            "reasoning_tokens": 20,
+            "cached_tokens": 0,
+            "total_tokens": 2369,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 1.1286999797448516
+          }
+        ],
+        "context_growth_tokens": 2338,
+        "cognitive_ratio": 0.81
+      },
+      "token_savings_pct": 76.96368038740921
+    },
+    {
+      "scenario": "query",
+      "num_rows": 100,
+      "baseline": {
+        "condition": "baseline_generic_file_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 248,
+        "subsequent_prompt_tokens": 4692,
+        "total_prompt_tokens": 4940,
+        "visible_completion_tokens": 61,
+        "reasoning_tokens": 353,
+        "total_completion_tokens": 414,
+        "cached_tokens": 0,
+        "total_tokens": 5354,
+        "turns": 2,
+        "wall_clock_seconds": 0.003376099979504943,
+        "verified": true,
+        "verification_message": "Table intact with 79 rows.",
+        "final_output": "Found 3 tasks in Security & Auth: Task 4 (Resolve memory leak), Task 11 (Special Tag #11), Task 18 (Resolve memory leak).",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 248,
+            "completion_tokens": 27,
+            "reasoning_tokens": 45,
+            "cached_tokens": 0,
+            "total_tokens": 320,
+            "tool_calls": [
+              "read_file"
+            ],
+            "tool_results_bytes": 12532,
+            "latency_ms": 1.3411999680101871
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 4692,
+            "completion_tokens": 34,
+            "reasoning_tokens": 308,
+            "cached_tokens": 0,
+            "total_tokens": 5034,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 2.019600011408329
+          }
+        ],
+        "context_growth_tokens": 4692,
+        "cognitive_ratio": 5.79
+      },
+      "rowlite": {
+        "condition": "rowlite_mcp_tools",
+        "num_rows": 100,
+        "turn1_prompt_tokens": 2244,
+        "subsequent_prompt_tokens": 2455,
+        "total_prompt_tokens": 4699,
+        "visible_completion_tokens": 57,
+        "reasoning_tokens": 65,
+        "total_completion_tokens": 122,
+        "cached_tokens": 0,
+        "total_tokens": 4821,
+        "turns": 2,
+        "wall_clock_seconds": 0.0038508999859914184,
+        "verified": true,
+        "verification_message": "Table intact with 79 rows.",
+        "final_output": "Operation 'query' completed successfully via Rowlite.",
+        "turn_records": [
+          {
+            "turn_number": 1,
+            "prompt_tokens": 2244,
+            "completion_tokens": 46,
+            "reasoning_tokens": 45,
+            "cached_tokens": 0,
+            "total_tokens": 2335,
+            "tool_calls": [
+              "rowlite_list"
+            ],
+            "tool_results_bytes": 532,
+            "latency_ms": 2.6911000022664666
+          },
+          {
+            "turn_number": 2,
+            "prompt_tokens": 2455,
+            "completion_tokens": 11,
+            "reasoning_tokens": 20,
+            "cached_tokens": 0,
+            "total_tokens": 2486,
+            "tool_calls": [],
+            "tool_results_bytes": 0,
+            "latency_ms": 1.1486000148579478
+          }
+        ],
+        "context_growth_tokens": 2455,
+        "cognitive_ratio": 1.14
+      },
+      "token_savings_pct": 9.955173701905117
+    }
+  ],
+  "audit_findings": [
+    {
+      "severity": "RED_FLAG",
+      "rule": "TOKEN_SAVINGS_SUBPAR",
+      "message": "Total token reduction on 100 rows is only 10.0% (expected >= 50%).",
+      "detail": "Baseline: 5354, Rowlite: 4821"
+    }
+  ]
+}

@@ -410,9 +410,8 @@ def save_gif_from_frames(frames, output_path):
 
 def build_gif():
     frames_p1, frames_p2 = generate_frames()
-    frames_full = frames_p1 + frames_p2
-    
-    assets_dir = r"c:\work\git\rowlite\docs\assets"
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    assets_dir = os.path.join(repo_root, "docs", "assets")
     os.makedirs(assets_dir, exist_ok=True)
     
     # 1. Full combined demo

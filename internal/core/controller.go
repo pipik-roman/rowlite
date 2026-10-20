@@ -1118,15 +1118,18 @@ func AppendRowsWithOptions(
 	var validatedRows [][]string
 	var resolvedRows []map[string]string
 	for _, rowMap := range newRows {
+		if len(rowMap) == 0 {
+			return fmt.Errorf("append error: row data is empty")
+		}
+
 		// Map keys in rowMap (user inputs) to exact GFM headers using case-insensitive/normalized lookup
 		resolvedMap := make(map[string]string)
 		for k, v := range rowMap {
 			_, resolvedName, err := ResolveColumn(cfg.Headers, k)
-			if err == nil {
-				resolvedMap[resolvedName] = v
-			} else {
-				resolvedMap[k] = v
+			if err != nil {
+				return fmt.Errorf("append error: %w", err)
 			}
+			resolvedMap[resolvedName] = v
 		}
 
 		// Fill auto-increment column if empty or update currentMax if explicit value is passed
@@ -1319,15 +1322,16 @@ func Normalize(s string) string {
 // ResolveColumn finds the zero-based index of a column by name.
 // It tries: 1. Exact Match, 2. Case-Insensitive Match, 3. Normalized Match.
 func ResolveColumn(headers []string, target string) (int, string, error) {
+	trimmed := strings.TrimSpace(target)
 	// 1. Exact Match
 	for i, h := range headers {
-		if h == target {
+		if h == target || h == trimmed {
 			return i, h, nil
 		}
 	}
 
 	// 2. Case-Insensitive Match
-	targetLower := strings.ToLower(target)
+	targetLower := strings.ToLower(trimmed)
 	for i, h := range headers {
 		if strings.ToLower(h) == targetLower {
 			return i, h, nil

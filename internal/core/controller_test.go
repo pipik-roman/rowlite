@@ -564,6 +564,50 @@ func TestAppendRowCaseInsensitiveAndNormalized(t *testing.T) {
 	}
 }
 
+func TestAppendRowUnknownColumnRejection(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "rowlite_append_reject_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	columns := []string{"Task ID", "Task Description", "Status"}
+	cfg := core.TableConfig{}
+
+	err = core.InitTable(context.Background(), tmpFile.Name(), columns, cfg)
+	if err != nil {
+		t.Fatalf("InitTable failed: %v", err)
+	}
+
+	// 1. Appending with an unknown column should fail with an informative error
+	err = core.AppendRow(context.Background(), tmpFile.Name(), map[string]string{
+		"Task ID":     "1",
+		"Description": "This key does not match Task Description exactly or normalized",
+	})
+	if err == nil {
+		t.Fatal("Expected AppendRow with unknown column to fail, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "column \"Description\" not found") {
+		t.Errorf("Expected error to mention column not found, got: %v", err)
+	}
+
+	// 2. Appending empty map should fail
+	err = core.AppendRow(context.Background(), tmpFile.Name(), map[string]string{})
+	if err == nil {
+		t.Fatal("Expected AppendRow with empty row map to fail, but it succeeded")
+	}
+
+	// 3. Verify no empty rows were inserted into the table
+	_, rows, err := core.ParseFrontmatterAndContent(context.Background(), tmpFile.Name(), core.ContentModeAll)
+	if err != nil {
+		t.Fatalf("ParseFrontmatterAndContent failed: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("Expected 0 rows in table after failed appends, got %d", len(rows))
+	}
+}
+
 func TestSortTableActionWithTrigger(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "rowlite_sort_trigger_*.md")
 	if err != nil {

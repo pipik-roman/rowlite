@@ -16,16 +16,13 @@
 | **Auto-Increment Append** | 50 | **3 / 3 / 3** | 13,422 | 8,912 | 4,598 | **65.7%** | **48.4%** | All PASS |
 | **Bounded Slicing Query** | 50 | **2 / 2 / 4** | 4,271 | 4,752 | 6,307 | **-47.7%** | **-32.7%** | All PASS |
 
-> [!NOTE]
-> `*` Indicates Whole-File Baseline aborted during table rewrite due to inference server GPU decode KV-cache Out-Of-Memory (OOM).
-
 ---
 
 ## 2. MCP Tool Schema Size & Token Budget Analysis
 
 - **Tokenizer**: `tiktoken` (`cl100k_base`)
 - **Active Properties**: **22 properties** across 8 tools
-- **Total Schema Tax**: **811 tokens** per turn (2,928 bytes JSON schema)
+- **Total Schema Tax**: **842 tokens** per turn (3,066 bytes JSON schema, including 31 tokens server instructions)
 
 | MCP Tool | Properties | Schema Bytes | Schema Tokens (`cl100k_base`) | Parameters |
 | :--- | :---: | :---: | :---: | :--- |
@@ -37,7 +34,8 @@
 | **rowlite_list** | 4 | 439 B | 123 | `file`, `where`, `limit`, `offset` |
 | **rowlite_sort** | 2 | 289 B | 81 | `file`, `by` |
 | **rowlite_update** | 4 | 464 B | 132 | `file`, `where`, `index`, `set` |
-| **TOTAL** | **22** | **2,928 B** | **811** | **8 MCP Tools** |
+| **server_instructions** | - | 138 B | 31 | *Shared syntax rules for `where` & `sort`* |
+| **TOTAL** | **22** | **3,066 B** | **842** | **8 MCP Tools + Instructions** |
 
 ---
 

@@ -70,6 +70,8 @@ class StdioMCPClient:
         if "error" in resp:
             raise RuntimeError(f"MCP initialize failed: {resp['error']}")
 
+        self.instructions = resp.get("result", {}).get("instructions", "")
+
         # Send initialized notification
         notify = {
             "jsonrpc": "2.0",
@@ -77,6 +79,9 @@ class StdioMCPClient:
             "params": {},
         }
         self._send(notify)
+
+    def get_instructions(self) -> str:
+        return getattr(self, "instructions", "")
 
     def list_tools(self) -> List[Dict[str, Any]]:
         """

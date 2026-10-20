@@ -78,7 +78,7 @@ def parse_gfm_table_rows(file_path: str):
 
 
 def verify_point_update(file_path: str, task_id: str = "2", expected_status: str = "active") -> Tuple[bool, str]:
-    """Verifies that target task_id has expected_status in Status State."""
+    """Verifies that target task_id has expected_status in Status State and preserves other row fields."""
     try:
         headers, rows = parse_gfm_table_rows(file_path)
         if not headers or not rows:
@@ -87,9 +87,15 @@ def verify_point_update(file_path: str, task_id: str = "2", expected_status: str
         for r in rows:
             if r.get("Task ID") == task_id:
                 curr = r.get("Status State")
-                if curr == expected_status:
-                    return True, f"Task {task_id} successfully updated to Status State '{expected_status}'."
-                return False, f"Task {task_id} found but Status State is '{curr}', expected '{expected_status}'."
+                if curr != expected_status:
+                    return False, f"Task {task_id} found but Status State is '{curr}', expected '{expected_status}'."
+                desc = r.get("Task Description", "")
+                if not desc or desc != "Fix responsive layout on mobile screens":
+                    return False, f"Task {task_id} Task Description was corrupted/wiped: '{desc}'."
+                cat = r.get("Category Name", "")
+                if not cat or cat != "Frontend UI / UX":
+                    return False, f"Task {task_id} Category Name was corrupted/wiped: '{cat}'."
+                return True, f"Task {task_id} successfully updated to Status State '{expected_status}' with row integrity preserved."
 
         return False, f"Task ID {task_id} not found in table."
     except Exception as e:
@@ -118,8 +124,15 @@ def verify_batch_update(file_path: str, filter_col: str = "Priority Level", filt
         return False, f"Verification exception: {e}"
 
 
-def verify_append(file_path: str, expected_desc: str = "Deploy OAuth2 gateway") -> Tuple[bool, str]:
-    """Verifies that a new row with expected_desc was appended with non-empty Task ID and Created At."""
+def verify_append(
+    file_path: str,
+    expected_desc: str = "Deploy OAuth2 gateway",
+    expected_cat: str = "DevOps & CI/CD",
+    expected_prio: str = "high",
+    expected_status: str = "active",
+    expected_score: str = "99",
+) -> Tuple[bool, str]:
+    """Verifies that a new row was appended with all expected columns populated, including autoinc ID and audit timestamp."""
     try:
         headers, rows = parse_gfm_table_rows(file_path)
         if not headers or not rows:
@@ -129,9 +142,25 @@ def verify_append(file_path: str, expected_desc: str = "Deploy OAuth2 gateway") 
             if r.get("Task Description") == expected_desc:
                 tid = r.get("Task ID", "")
                 created = r.get("Created At", "")
-                if tid and tid != "":
-                    return True, f"Appended row found with Task ID '{tid}' and Created At '{created}'."
-                return False, f"Appended row found but Task ID is empty: {r}"
+                cat = r.get("Category Name", "")
+                prio = r.get("Priority Level", "")
+                status = r.get("Status State", "")
+                score = r.get("Score Metric", "")
+
+                if not tid:
+                    return False, f"Appended row found but Task ID is empty: {r}"
+                if not created:
+                    return False, f"Appended row found but Created At timestamp is empty: {r}"
+                if cat != expected_cat:
+                    return False, f"Appended row has Category Name '{cat}', expected '{expected_cat}'."
+                if prio != expected_prio:
+                    return False, f"Appended row has Priority Level '{prio}', expected '{expected_prio}'."
+                if status != expected_status:
+                    return False, f"Appended row has Status State '{status}', expected '{expected_status}'."
+                if score != expected_score:
+                    return False, f"Appended row has Score Metric '{score}', expected '{expected_score}'."
+
+                return True, f"Appended row verified: Task ID '{tid}', Description '{expected_desc}', Category '{cat}', Priority '{prio}', Status '{status}', Score '{score}', Created At '{created}'."
 
         return False, f"Row with Task Description '{expected_desc}' was not found in table."
     except Exception as e:

@@ -297,14 +297,21 @@ def format_snapshot_markdown(
             f"| **{sc.name}** | {r.num_rows} | **{b_whole.turns} / {b_grep.turns} / {r.turns}** | {whole_total_str} | {b_grep.total_tokens:,} | {r.total_tokens:,} | **{savings_whole:.1f}%** | **{savings_grep:.1f}%** | {v_status} |"
         )
 
-    md.append("")
-    md.append("> [!NOTE]")
-    md.append("> `*` Indicates Whole-File Baseline aborted during table rewrite due to inference server GPU decode KV-cache Out-Of-Memory (OOM).")
+    has_aborted_whole = any(
+        not b_whole.verified or "OOM" in b_whole.final_output or "*" in str(b_whole.total_tokens)
+        for _, b_whole, _, _ in results_list
+    )
+    if has_aborted_whole:
+        md.append("")
+        md.append("> [!NOTE]")
+        md.append("> `*` Indicates Whole-File Baseline aborted during table rewrite due to inference server GPU decode KV-cache Out-Of-Memory (OOM).")
 
     if schema_data:
         tot_tok = schema_data["total_tokens"]
         tot_props = schema_data["total_properties"]
         tot_bytes = schema_data["total_bytes"]
+        has_inst = bool(schema_data.get("instructions"))
+        inst_note = f" (including {schema_data['instructions']['tokens']} tokens server instructions)" if has_inst else ""
         md.extend([
             "",
             "---",
@@ -313,7 +320,7 @@ def format_snapshot_markdown(
             "",
             "- **Tokenizer**: `tiktoken` (`cl100k_base`)",
             f"- **Active Properties**: **{tot_props} properties** across {schema_data['total_tools']} tools",
-            f"- **Total Schema Tax**: **{tot_tok:,} tokens** per turn ({tot_bytes:,} bytes JSON schema)",
+            f"- **Total Schema Tax**: **{tot_tok:,} tokens** per turn ({tot_bytes:,} bytes JSON schema){inst_note}",
             "",
         ])
         md.extend(format_schema_markdown_table(schema_data))

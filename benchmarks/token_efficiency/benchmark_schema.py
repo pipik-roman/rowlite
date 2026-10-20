@@ -77,11 +77,21 @@ LEGACY_TOTAL_BYTES = 9033
 
 
 def measure_mcp_schema(rowlite_bin: str = "rowlite") -> Dict[str, Any]:
-    import tiktoken
+    enc = None
+    try:
+        import tiktoken
+        enc = tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        enc = None
 
-    enc = tiktoken.get_encoding("cl100k_base")
+    def count_tok(s: str) -> int:
+        if enc:
+            return len(enc.encode(s))
+        return max(1, len(s) // 4)
+
     with StdioMCPClient(command=rowlite_bin, cwd=REPO_ROOT) as client:
         tools = client.list_tools()
+        instructions = client.get_instructions()
 
     per_tool: Dict[str, Dict[str, Any]] = {}
     total_bytes = 0
@@ -94,7 +104,7 @@ def measure_mcp_schema(rowlite_bin: str = "rowlite") -> Dict[str, Any]:
         props = list(params.get("properties", {}).keys())
         serialized = json.dumps(t)
         b_len = len(serialized.encode("utf-8"))
-        tok_len = len(enc.encode(serialized))
+        tok_len = count_tok(serialized)
 
         per_tool[name] = {
             "name": name,
@@ -108,14 +118,33 @@ def measure_mcp_schema(rowlite_bin: str = "rowlite") -> Dict[str, Any]:
         total_props += len(props)
 
     total_serialized = json.dumps(tools)
-    total_tokens = len(enc.encode(total_serialized))
+    tools_tokens = count_tok(total_serialized)
+    tools_bytes = len(total_serialized.encode("utf-8"))
+
+    instructions_data = None
+    total_tokens = tools_tokens
+    total_schema_bytes = tools_bytes
+
+    if instructions:
+        inst_bytes = len(instructions.encode("utf-8"))
+        inst_tokens = count_tok(instructions)
+        instructions_data = {
+            "text": instructions,
+            "bytes": inst_bytes,
+            "tokens": inst_tokens,
+        }
+        total_tokens += inst_tokens
+        total_schema_bytes += inst_bytes
 
     return {
         "timestamp": datetime.now().isoformat(),
         "total_tools": len(tools),
         "total_properties": total_props,
-        "total_bytes": len(total_serialized.encode("utf-8")),
+        "tools_bytes": tools_bytes,
+        "tools_tokens": tools_tokens,
+        "total_bytes": total_schema_bytes,
         "total_tokens": total_tokens,
+        "instructions": instructions_data,
         "tools": per_tool,
     }
 
@@ -139,6 +168,12 @@ def format_schema_comparison_console(current: Dict[str, Any], baseline_map: Dict
         props_str = ", ".join(info["properties"])
         lines.append(
             f" {name:<24} | {b_props:>12} | {c_props:>10} | {b_tok:>14} | {c_tok:>12} | {red_pct:>14.1f}% | [{props_str}]"
+        )
+
+    if current.get("instructions"):
+        inst = current["instructions"]
+        lines.append(
+            f" {'server_instructions':<24} | {'-':>12} | {'-':>10} | {'-':>14} | {inst['tokens']:>12} | {'-':>16} | [Shared syntax rules for where & sort]"
         )
 
     tot_tok = current["total_tokens"]
@@ -172,8 +207,14 @@ def format_schema_markdown_table(current: Dict[str, Any]) -> List[str]:
         lines.append(
             f"| **{name}** | {c_props} | {c_bytes:,} B | {c_tok} | {props_str} |"
         )
+    if current.get("instructions"):
+        inst = current["instructions"]
+        lines.append(
+            f"| **server_instructions** | - | {inst['bytes']:,} B | {inst['tokens']} | *Shared syntax rules for `where` & `sort`* |"
+        )
+    tool_label = f"{current.get('total_tools', 8)} MCP Tools + Instructions" if current.get("instructions") else f"{current.get('total_tools', 8)} MCP Tools"
     lines.append(
-        f"| **TOTAL** | **{tot_props}** | **{tot_bytes:,} B** | **{tot_tok:,}** | **8 MCP Tools** |"
+        f"| **TOTAL** | **{tot_props}** | **{tot_bytes:,} B** | **{tot_tok:,}** | **{tool_label}** |"
     )
     return lines
 
@@ -182,13 +223,15 @@ def format_schema_snapshot_markdown(current: Dict[str, Any]) -> str:
     tot_tok = current["total_tokens"]
     tot_props = current["total_properties"]
     tot_bytes = current["total_bytes"]
+    has_inst = bool(current.get("instructions"))
+    inst_sub = f" (including {current['instructions']['tokens']} tokens server instructions)" if has_inst else ""
 
     md = [
         f"# Benchmark Snapshot: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (MCP Tool Schema Size Footprint)",
         "",
         "- **Milestone**: AI-First Minimal MCP Schema Footprint & Server Instructions",
         "- **Tokenizer**: `tiktoken` (`cl100k_base`)",
-        f"- **Total Schema Tax**: **{tot_tok:,} tokens** per turn ({tot_bytes:,} bytes JSON schema)",
+        f"- **Total Schema Tax**: **{tot_tok:,} tokens** per turn ({tot_bytes:,} bytes JSON schema){inst_sub}",
         f"- **Total Properties**: **{tot_props} properties** across {current['total_tools']} tools",
         "",
         "---",

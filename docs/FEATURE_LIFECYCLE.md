@@ -98,4 +98,17 @@ Every MCP tool schema and property description is injected into the LLM's contex
   - Verifies that cross-compilation targets (`darwin/amd64`, `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`) compile cleanly without OS-specific breakage.
 * **Release Configurations**:
   - Keep [`.goreleaser.yaml`](../.goreleaser.yaml) and MCP Registry workflows ([`.github/workflows/release-mcp-registry.yml`](../.github/workflows/release-mcp-registry.yml)) aligned with build matrix and manifest schema requirements.
+* **Dual-Branch Governance (`develop` vs. `main`)**:
+  - `main` always matches the latest public release tag (`v*.*.*`). The `README.md` and benchmarks on `main` represent public release state.
+  - Active feature development, benchmarks, refactoring, and bugfixes land on `develop`.
+  - Direct pushes to `main` are restricted by GitHub Rulesets. All promotions to `main` arrive via Pull Requests from `develop`.
+* **Pre-Release Verification (`vX.Y.Z-rc.N`)**:
+  - Tag candidate releases (e.g. `v0.4.0-rc.1`) from `develop` when validating complex feature suites or MCP schema modifications.
+  - GoReleaser automatically marks these builds as Pre-release on GitHub, avoiding unexpected upgrades for `go install ...@latest` consumers.
+* **Promotion & Release Checklist**:
+  1. Complete feature verification and unit/benchmark tests on `develop`.
+  2. Open and merge a Pull Request from `develop` into `main`.
+  3. Ensure all CI checks (`test`, `govulncheck`, `Hermetic Integrity Guard`) pass.
+  4. Tag the new version on `main`: `git tag -a v0.4.0 -m "Release v0.4.0 - ..."`
+  5. Push the tag to trigger GoReleaser: `git push origin v0.4.0`.
 
